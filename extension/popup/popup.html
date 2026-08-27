@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>RazorFlow</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <header class="popup-header">
+      <div class="popup-brand">
+        <img
+          class="popup-logo"
+          src="../assets/logo.png"
+          alt=""
+          width="36"
+          height="36"
+        />
+        <div>
+          <h1>RazorFlow</h1>
+          <p class="popup-tagline">AI commerce agent for the open web</p>
+        </div>
+      </div>
+    </header>
+
+    <section class="popup-section demo-banner" id="demo-banner">
+      <p class="demo-banner-kicker">Demo mode</p>
+      <p id="demo-hint" class="popup-note"></p>
+      <button type="button" id="start-demo-run" class="action-button primary">
+        Start demo run
+      </button>
+      <button type="button" id="open-demo-store" class="action-button subtle">
+        Open demo store
+      </button>
+    </section>
+
+    <section class="popup-section">
+      <h2>Task</h2>
+      <p id="bridge-status" class="bridge-status" data-status="connecting">
+        Agent backend connecting…
+      </p>
+      <p id="config-hint" class="config-hint popup-note" hidden></p>
+      <label class="task-field" for="task-input">
+        <span>What should RazorFlow do?</span>
+        <input
+          id="task-input"
+          type="text"
+          value="find cheapest shampoo"
+          placeholder="e.g. find cheapest shampoo and proceed to checkout"
+        />
+      </label>
+      <div class="task-actions">
+        <button type="button" id="run-task" class="action-button primary">
+          Run
+        </button>
+        <button type="button" id="resume-run" class="action-button">
+          Resume
+        </button>
+        <button type="button" id="cancel-run" class="action-button subtle">
+          Cancel
+        </button>
+      </div>
+      <p id="task-feedback" class="popup-note" hidden></p>
+      <div id="waiting-banner" class="waiting-banner" hidden>
+        <p class="waiting-banner-kicker">Handoff</p>
+        <p id="waiting-banner-message" class="waiting-banner-message"></p>
+      </div>
+    </section>
+
+    <section class="popup-section" id="voice-section">
+      <h2>Voice</h2>
+      <button
+        type="button"
+        id="voice-ptt"
+        class="voice-ptt-button"
+        aria-label="Hold to speak"
+      >
+        Hold to speak
+      </button>
+      <p id="voice-feedback" class="voice-feedback" aria-live="polite">
+        Hold to speak a task, or say &quot;continue&quot; while paused.
+      </p>
+    </section>
+
+    <section class="popup-section" id="payment-section" hidden>
+      <h2>Payment</h2>
+      <p id="payment-summary" class="popup-note"></p>
+      <div class="task-actions">
+        <button type="button" id="confirm-payment-link" class="action-button primary">
+          Create payment link
+        </button>
+        <button type="button" id="decline-payment-link" class="action-button subtle">
+          Decline
+        </button>
+      </div>
+      <button type="button" id="open-payment-link" class="action-button" hidden>
+        Open payment link
+      </button>
+    </section>
+
+    <section class="popup-section">
+      <h2>Run timeline</h2>
+      <p id="run-context" class="run-context popup-note">No active run.</p>
+      <ol id="run-timeline" class="run-timeline" aria-live="polite"></ol>
+      <p id="timeline-empty" class="popup-note">Events will appear here as RazorFlow works.</p>
+    </section>
+
+    <section class="popup-section">
+      <h2>Payment audit</h2>
+      <p class="popup-note">Policy and MCP events for the current run.</p>
+      <ol id="payment-audit" class="audit-list" aria-live="polite"></ol>
+      <p id="audit-empty" class="popup-note">No payment audit entries yet.</p>
+      <button type="button" id="refresh-audit" class="action-button subtle">
+        Refresh audit
+      </button>
+    </section>
+
+    <section class="popup-section dev-only" id="dev-tools">
+      <h2>Developer tools</h2>
+      <div class="button-row" id="state-buttons">
+        <button type="button" data-state="idle">Idle</button>
+        <button type="button" data-state="thinking">Thinking</button>
+        <button type="button" data-state="acting">Acting</button>
+        <button type="button" data-state="paused">Paused</button>
+      </div>
+      <button type="button" id="run-demo-flow" class="action-button">
+        Overlay search demo
+      </button>
+      <button type="button" id="move-cursor" class="action-button">
+        Move cursor sample
+      </button>
+      <button type="button" id="show-highlight" class="action-button">
+        Flash highlight sample
+      </button>
+      <button type="button" id="toggle-overlay" class="action-button subtle">
+        Toggle overlay
+      </button>
+    </section>
+
+    <script type="module" src="popup.js"></script>
+  </body>
+</html>

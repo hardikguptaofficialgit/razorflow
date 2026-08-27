@@ -1,0 +1,433 @@
+"""Agent Runtime V2 — central execution loop."""
+
+from __future__ import annotations
+
+import time
+from dataclasses import dataclass
+from typing import Literal
+
+from core.protocol import ActionStep, PageContext
+
+from agent_runtime.chat.messages import completion_message, planning_ack
+from agent_runtime.events.trace import emit_trace
+from agent_runtime.executor.actions import AgentAction
+from agent_runtime.executor.translate import translate_action
+from agent_runtime.memory.sync import sync_memory_from_observation
+from agent_runtime.memory.task_memory import TaskMemory
+from agent_runtime.observation.browser_state import BrowserPage, observe_from_page_context
+from agent_runtime.planner.llm_provider import LLMProvider, get_default_llm_provider
+from agent_runtime.planner.planner import LLMPlanner
+from agent_runtime.recovery.stuck import detect_stuck, record_action
+from agent_runtime.state.phase import RuntimePhase
+from agent_runtime.state.run_state import RunState
+from agent_runtime.policy.action_gate import filter_forbidden_actions, handoff_allowed
+from agent_runtime.task.parser import ParsedTask, parse_task_with_spec
+from agent_runtime.verifier.action_result import apply_verified_progress, verify_action_result
+from agent_runtime.verifier.goal import approve_completion, is_goal_satisfied, update_milestones
+
+
+TerminalKind = Literal[
+    "continue",
+    "complete",
+    "handoff",
+    "needs_clarification",
+    "error",
+    "payment",
+]
+
+
+@dataclass
+class DispatchResult:
+    kind: TerminalKind
+    steps: list[ActionStep]
+    message: str = ""
+    runtime_phase: str = "acting"
+    action_summary: str = ""
+    chat_message: str = ""
+
+
+class AgentRuntime:
+    def __init__(self, llm: LLMProvider | None = None) -> None:
+        self._llm = llm or get_default_llm_provider()
+        self._planner = LLMPlanner(self._llm)
+        self._runs: dict[str, RunState] = {}
+
+    def start_run(
+        self,
+        run_id: str,
+        task: str,
+        page_context: PageContext | None,
+        *,
+        connection_id: str = "",
+    ) -> RunState:
+        parsed, spec = parse_task_with_spec(task)
+        memory = TaskMemory(
+            goal=parsed.goal,
+            items_target=parsed.item_count,
+            remaining_work=_initial_remaining(parsed),
+            remaining_items=list(spec.remaining_items),
+        )
+        if parsed.budget_inr is not None:
+            memory.constraints.append(f"budget_inr<={parsed.budget_inr:.0f}")
+        if parsed.prefer_best:
+            memory.constraints.append("prefer_best_match")
+
+        state = RunState(
+            run_id=run_id,
+            task=task,
+            parsed_task=parsed,
+            task_spec=spec,
+            memory=memory,
+            connection_id=connection_id,
+        )
+        if not parsed.actionable:
+            state.phase = RuntimePhase.NEEDS_CLARIFICATION
+            state.needs_clarification_reason = parsed.clarification_reason
+            self._runs[run_id] = state
+            emit_trace(run_id, "TASK_PARSED", step=0, actionable=False)
+            return state
+
+        page = observe_from_page_context(page_context)
+        state.memory.current_page = page
+        sync_memory_from_observation(state, page)
+        update_milestones(state, page)
+        self._runs[run_id] = state
+        emit_trace(run_id, "RUN_STARTED", step=0, goal=parsed.goal)
+        return state
+
+    def get_run(self, run_id: str) -> RunState | None:
+        return self._runs.get(run_id)
+
+    def resume_run(self, run_id: str, page_context: PageContext | None) -> RunState | None:
+        state = self._runs.get(run_id)
+        if state is None:
+            return None
+        state.waiting_for_user = False
+        state.phase = RuntimePhase.OBSERVING
+        page = observe_from_page_context(page_context)
+        state.memory.current_page = page
+        emit_trace(run_id, "RESUME", step=state.step)
+        return state
+
+    def cancel_run(self, run_id: str) -> None:
+        state = self._runs.pop(run_id, None)
+        if state:
+            state.phase = RuntimePhase.FAILED
+            emit_trace(run_id, "CANCELLED", step=state.step)
+
+    def observe(self, state: RunState, page_context: PageContext | None) -> BrowserPage | None:
+        state.phase = RuntimePhase.OBSERVING
+        page = observe_from_page_context(page_context)
+        state.memory.current_page = page
+        sync_memory_from_observation(state, page)
+        update_milestones(state, page)
+        emit_trace(state.run_id, "OBSERVATION", step=state.step, url=page.url if page else "")
+        return page
+
+    def dispatch_next(
+        self,
+        state: RunState,
+        page_context: PageContext | None,
+    ) -> DispatchResult:
+        if state.phase == RuntimePhase.NEEDS_CLARIFICATION:
+            return DispatchResult(
+                kind="needs_clarification",
+                steps=[],
+                message=state.needs_clarification_reason,
+            )
+
+        page = self.observe(state, page_context)
+
+        if approve_completion(state, page, source="pre_plan"):
+            state.phase = RuntimePhase.GOAL_REACHED
+            return DispatchResult(
+                kind="complete",
+                steps=[],
+                message=completion_message(state, page),
+                chat_message=completion_message(state, page),
+            )
+
+        stuck = detect_stuck(state)
+        if stuck:
+            state.phase = RuntimePhase.RECOVERING
+            state.planner_nudge = stuck
+            emit_trace(state.run_id, "RECOVERY", step=state.step, reason=stuck)
+
+        if state.consecutive_failures >= 8:
+            state.phase = RuntimePhase.FAILED
+            return DispatchResult(
+                kind="error",
+                steps=[],
+                message=(
+                    "Could not make verified progress after several attempts. "
+                    "Try rephrasing the task or adjusting the page."
+                ),
+            )
+
+        if state.consecutive_failures >= 2:
+            state.planner_nudge = (
+                state.planner_nudge
+                or f"{state.consecutive_failures} consecutive failures. "
+                "Re-observe the page and choose a different strategy."
+            )
+
+        if state.pending_actions and state.pending_action_index < len(state.pending_actions):
+            return self._dispatch_pending(state)
+
+        state.phase = RuntimePhase.PLANNING
+        started = time.perf_counter()
+        try:
+            screenshot = page_context.screenshot_data_url if page_context else None
+            plan = self._planner.plan(state, page, screenshot_data_url=screenshot)
+        except Exception as error:
+            state.phase = RuntimePhase.FAILED
+            return DispatchResult(kind="error", steps=[], message=str(error))
+
+        emit_trace(
+            state.run_id,
+            "PLAN",
+            step=state.step,
+            duration_ms=int((time.perf_counter() - started) * 1000),
+        )
+
+        if plan.propose_finish:
+            if approve_completion(state, page, source="llm_proposal"):
+                state.phase = RuntimePhase.GOAL_REACHED
+                return DispatchResult(
+                    kind="complete",
+                    steps=[],
+                    message=completion_message(state, page),
+                    chat_message=completion_message(state, page),
+                )
+            state.planner_nudge = (
+                "Goal is not verified yet. Do not propose finish. "
+                "Return 1-3 concrete browser actions."
+            )
+            plan = self._planner.plan(state, page, screenshot_data_url=screenshot)
+
+        if plan.propose_handoff:
+            if handoff_allowed(page, plan.handoff_reason or ""):
+                state.phase = RuntimePhase.HANDOFF
+                state.waiting_for_user = True
+                reason = plan.handoff_reason or "User input required to continue."
+                return DispatchResult(
+                    kind="handoff",
+                    steps=[],
+                    message=reason,
+                    runtime_phase="handoff",
+                )
+            state.planner_nudge = (
+                "Handoff is not allowed for this situation. "
+                "Do not propose handoff for uncertainty or failed clicks. "
+                "Re-observe and return 1-3 concrete browser actions."
+            )
+            plan = self._planner.plan(state, page, screenshot_data_url=screenshot)
+
+        spec = state.task_spec
+        if spec and plan.actions:
+            allowed, blocked = filter_forbidden_actions(spec, plan.actions)
+            if blocked:
+                state.planner_nudge = (
+                    "These actions violate the user goal and were blocked: "
+                    + "; ".join(blocked)
+                    + ". Choose actions that match the declared intent only."
+                )
+                emit_trace(
+                    state.run_id,
+                    "ACTION_BLOCKED",
+                    step=state.step,
+                    blocked=blocked,
+                )
+            plan.actions = allowed
+
+        if not plan.actions:
+            if is_goal_satisfied(state, page):
+                if approve_completion(state, page, source="empty_plan_satisfied"):
+                    state.phase = RuntimePhase.GOAL_REACHED
+                    return DispatchResult(
+                        kind="complete",
+                        steps=[],
+                        message=completion_message(state, page),
+                        chat_message=completion_message(state, page),
+                    )
+            state.empty_plan_retries += 1
+            if state.empty_plan_retries >= 3:
+                state.phase = RuntimePhase.FAILED
+                return DispatchResult(
+                    kind="error",
+                    steps=[],
+                    message="Planner could not produce valid actions for this goal.",
+                )
+            state.planner_nudge = (
+                state.planner_nudge
+                or "Return 1-3 concrete browser actions that advance the remaining goal."
+            )
+            return self.dispatch_next(state, page_context)
+
+        state.empty_plan_retries = 0
+        state.pending_actions = plan.actions[:3]
+        state.pending_action_index = 0
+        state.last_chat_message = (
+            plan.user_message.strip()
+            or plan.reasoning.strip()
+            or planning_ack(state.task)
+        )
+        return self._dispatch_pending(state)
+
+    def _dispatch_pending(self, state: RunState) -> DispatchResult:
+        action = state.pending_actions[state.pending_action_index]
+        steps = translate_action(action)
+        if not steps and action.type == "finish":
+            page = state.memory.current_page
+            if approve_completion(state, page, source="finish_action"):
+                state.phase = RuntimePhase.GOAL_REACHED
+                state.pending_actions = []
+                return DispatchResult(
+                    kind="complete",
+                    steps=[],
+                    message=completion_message(state, page),
+                    chat_message=completion_message(state, page),
+                )
+            state.planner_nudge = "Goal not verified. Choose the next concrete action."
+            state.pending_actions = []
+            return self.dispatch_next(state, _page_context_from_memory(state))
+
+        if not steps:
+            state.pending_action_index += 1
+            if state.pending_action_index >= len(state.pending_actions):
+                state.pending_actions = []
+            return self.dispatch_next(state, _page_context_from_memory(state))
+
+        state.phase = RuntimePhase.ACTING
+        state.step += 1
+        state.last_dispatched_action = action
+        summary = f"{action.type}: {action.reason[:80]}"
+        chat_message = state.last_chat_message or action.reason[:160]
+        emit_trace(
+            state.run_id,
+            "ACTION_DISPATCHED",
+            step=state.step,
+            action=action.type,
+            reason=action.reason,
+        )
+        return DispatchResult(
+            kind="continue",
+            steps=steps,
+            action_summary=summary,
+            chat_message=chat_message,
+            runtime_phase="acting",
+        )
+
+    def record_result(
+        self,
+        state: RunState,
+        action: AgentAction,
+        *,
+        success: bool,
+        verified: bool | None,
+        error: str | None,
+        page_context: PageContext | None,
+    ) -> DispatchResult:
+        state.phase = RuntimePhase.VERIFYING
+        before = state.memory.current_page
+        before_sig = before.signature() if before else ""
+        page = self.observe(state, page_context)
+        after_sig = page.signature() if page else ""
+
+        ok = verify_action_result(
+            state,
+            action,
+            success=success,
+            verified=verified,
+            before=before,
+            after=page,
+        )
+        apply_verified_progress(state, action, page, ok=ok)
+
+        record_action(
+            state,
+            action=action,
+            page_url=page.url if page else "",
+            success=success,
+            verified=ok,
+            error=error,
+            state_before=before_sig,
+            state_after=after_sig,
+        )
+
+        emit_trace(
+            state.run_id,
+            "VERIFICATION",
+            step=state.step,
+            success=success,
+            verified=ok,
+            action=action.type,
+            target=action.target.element_id if action.target else None,
+            url_before=before.url if before else "",
+            url_after=page.url if page else "",
+            state_before=before_sig,
+            state_after=after_sig,
+        )
+
+        state.pending_action_index += 1
+        if state.pending_action_index >= len(state.pending_actions):
+            state.pending_actions = []
+
+        if action.type == "handoff" and success:
+            state.phase = RuntimePhase.HANDOFF
+            state.waiting_for_user = True
+            return DispatchResult(
+                kind="handoff",
+                steps=[],
+                message=error or "Please complete the required step, then tap Resume.",
+                runtime_phase="handoff",
+            )
+
+        if not ok:
+            state.planner_nudge = (
+                "The last action did not produce verified progress. "
+                "Do not repeat the same target. Re-observe and try another strategy."
+            )
+
+        if approve_completion(state, page, source="post_action"):
+            state.phase = RuntimePhase.GOAL_REACHED
+            msg = completion_message(state, page)
+            return DispatchResult(
+                kind="complete",
+                steps=[],
+                message=msg,
+                chat_message=msg,
+            )
+
+        return DispatchResult(kind="continue", steps=[], runtime_phase="observing")
+
+    def current_action(self, state: RunState) -> AgentAction | None:
+        if not state.pending_actions:
+            return None
+        idx = min(state.pending_action_index, len(state.pending_actions) - 1)
+        return state.pending_actions[idx]
+
+
+def _initial_remaining(parsed: ParsedTask) -> list[str]:
+    if parsed.goal == "search":
+        return ["find matching results"]
+    if parsed.goal == "add_to_cart":
+        if parsed.product_hints:
+            return [f"add {hint}" for hint in parsed.product_hints]
+        return [f"add {parsed.item_count} item(s) to cart"]
+    if parsed.goal == "view_cart":
+        return ["open cart page"]
+    if parsed.goal in {"checkout", "purchase"}:
+        return ["reach checkout"]
+    if parsed.goal == "remove":
+        return [f"remove {parsed.remove_target or 'item'} from cart"]
+    return ["complete user request"]
+
+
+def _page_context_from_memory(state: RunState) -> PageContext | None:
+    page = state.memory.current_page
+    if page is None:
+        return None
+    from core.protocol import PageContext
+
+    return PageContext(title=page.title, url=page.url)

@@ -1,0 +1,6 @@
+example_domain: PASS 4753ms https://example.com/
+books_travel_browse: PASS 52043ms https://books.toscrape.com/catalogue/its-only-the-himalayas_981/index.html
+books_scroll_catalog: FAIL 4567ms https://books.toscrape.com/catalogue/category/books/travel_2/index.html
+wikipedia_search: FAIL 31449ms https://en.wikipedia.org/w/index.php?search=&title=Special%3ASearch
+httpbin_form: PASS 15801ms https://httpbin.org/post
+books_back_nav: FAIL 13758ms https://books.toscrape.com/index.html

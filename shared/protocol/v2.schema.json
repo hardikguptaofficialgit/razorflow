@@ -1,0 +1,104 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://razorflow.dev/protocol/v2",
+  "title": "RazorFlow Agent Protocol V2",
+  "description": "Canonical action schema for Agent Runtime V2. Wire transport remains WebSocket v1 compatible via translation.",
+  "definitions": {
+    "ElementTarget": {
+      "type": "object",
+      "properties": {
+        "elementId": { "type": "string", "pattern": "^e[0-9]+$" },
+        "role": { "type": "string", "enum": ["search", "input", "button", "link"] },
+        "description": { "type": "string" },
+        "matchText": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "VerificationCondition": {
+      "type": "object",
+      "properties": {
+        "urlChanged": { "type": "boolean" },
+        "urlContains": { "type": "string" },
+        "urlMatches": { "type": "string" },
+        "resultsVisible": { "type": "boolean" },
+        "cartCountIncreased": { "type": "boolean" },
+        "valueEquals": { "type": "string" },
+        "elementVisible": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "AgentAction": {
+      "type": "object",
+      "required": ["type", "reason", "expectedOutcome"],
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "navigate",
+            "click",
+            "type",
+            "select",
+            "scroll",
+            "wait",
+            "search",
+            "extract",
+            "go_back",
+            "open_tab",
+            "close_tab",
+            "finish",
+            "handoff"
+          ]
+        },
+        "target": { "$ref": "#/definitions/ElementTarget" },
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "url": { "type": "string" },
+            "text": { "type": "string" },
+            "query": { "type": "string" },
+            "clear": { "type": "boolean" },
+            "submit": { "type": "boolean" },
+            "direction": { "type": "string", "enum": ["up", "down", "toward_target"] },
+            "amount": { "type": "number" },
+            "ms": { "type": "integer", "minimum": 0 },
+            "value": { "type": "string" }
+          },
+          "additionalProperties": true
+        },
+        "reason": { "type": "string", "minLength": 1 },
+        "expectedOutcome": { "type": "string", "minLength": 1 },
+        "verification": { "$ref": "#/definitions/VerificationCondition" }
+      },
+      "additionalProperties": false
+    },
+    "PlannerOutput": {
+      "type": "object",
+      "required": ["actions"],
+      "properties": {
+        "reasoning": { "type": "string" },
+        "actions": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/AgentAction" },
+          "maxItems": 3
+        },
+        "proposeFinish": { "type": "boolean", "default": false },
+        "proposeHandoff": { "type": "boolean", "default": false },
+        "handoffReason": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "RuntimePhase": {
+      "type": "string",
+      "enum": [
+        "planning",
+        "observing",
+        "acting",
+        "waiting",
+        "verifying",
+        "recovering",
+        "done",
+        "handoff"
+      ]
+    }
+  }
+}

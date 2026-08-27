@@ -1,0 +1,50 @@
+# Dependencies
+node_modules/
+.pnp
+.pnp.js
+
+# Environment
+.env
+.env.local
+.env.*.local
+.npmrc
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+env/
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Next.js
+.next/
+out/
+
+# Build / IDE
+.DS_Store
+*.log
+npm-debug.log*
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Chrome extension build output
+extension/dist/
+
+# OS
+Thumbs.db
+
+# Local LLM weights
+models/
+*.gguf
+

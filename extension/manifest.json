@@ -1,0 +1,40 @@
+{
+  "manifest_version": 3,
+  "name": "RazorFlow",
+  "version": "0.1.0",
+  "description": "AI browser agent overlay for autonomous e-commerce navigation.",
+  "background": {
+    "service_worker": "background/service-worker.js",
+    "type": "module"
+  },
+  "action": {
+    "default_title": "RazorFlow",
+    "default_popup": "popup/popup.html",
+    "default_icon": {
+      "16": "assets/icons/icon-16.png",
+      "48": "assets/icons/icon-48.png",
+      "128": "assets/icons/icon-128.png"
+    }
+  },
+  "icons": {
+    "16": "assets/icons/icon-16.png",
+    "48": "assets/icons/icon-48.png",
+    "128": "assets/icons/icon-128.png"
+  },
+  "web_accessible_resources": [
+    {
+      "resources": ["assets/logo.png", "assets/dock-texture.png"],
+      "matches": ["<all_urls>"]
+    }
+  ],
+  "permissions": ["activeTab", "offscreen", "scripting"],
+  "host_permissions": ["<all_urls>", "http://127.0.0.1:8765/*"],
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content/content-script.js"],
+      "css": ["content/overlay.css"],
+      "run_at": "document_idle"
+    }
+  ]
+}

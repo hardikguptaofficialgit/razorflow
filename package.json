@@ -1,0 +1,24 @@
+{
+  "name": "razorflow",
+  "version": "0.1.0",
+  "private": true,
+  "description": "RazorFlow — general browser agent SDK and demo",
+  "workspaces": [
+    "packages/*",
+    "fake-store"
+  ],
+  "scripts": {
+    "build:sdk": "npm run build -w @strykerinside/razorflow-protocol && npm run build -w @strykerinside/razorflow-browser && npm run build -w @strykerinside/razorflow-client",
+    "typecheck:sdk": "npm run typecheck -w @strykerinside/razorflow-protocol && npm run typecheck -w @strykerinside/razorflow-browser && npm run typecheck -w @strykerinside/razorflow-client",
+    "test:sdk": "node scripts/sdk-smoke.mjs",
+    "publish:sdk": "npm run build:sdk && npm publish -w @strykerinside/razorflow-protocol --access public && npm publish -w @strykerinside/razorflow-browser --access public && npm publish -w @strykerinside/razorflow-client --access public"
+  },
+  "devDependencies": {
+    "picocolors": "^1.1.1",
+    "tsup": "^8.4.0",
+    "typescript": "^5.8.2"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

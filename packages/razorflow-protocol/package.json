@@ -1,0 +1,37 @@
+{
+  "name": "@strykerinside/razorflow-protocol",
+  "version": "0.1.0",
+  "description": "Canonical RazorFlow agent protocol types and wire schemas",
+  "type": "module",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/strykerinside/razorpay.git",
+    "directory": "packages/razorflow-protocol"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "npm run build",
+    "generate": "node ../../scripts/generate-protocol-types.mjs"
+  },
+  "devDependencies": {
+    "tsup": "^8.4.0",
+    "typescript": "^5.8.2"
+  }
+}
