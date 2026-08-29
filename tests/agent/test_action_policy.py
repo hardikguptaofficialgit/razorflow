@@ -20,7 +20,7 @@ from core.run_manager import RunSession  # noqa: E402
 from core.task_intent import parse_task_intent  # noqa: E402
 
 
-def test_fallback_add_when_llm_returns_empty() -> None:
+def test_empty_plan_is_replanned_instead_of_synthesizing_an_action() -> None:
     session = RunSession(
         run_id="policy-fallback",
         task="add 2 snacks under ₹200",
@@ -54,8 +54,9 @@ def test_fallback_add_when_llm_returns_empty() -> None:
 
     guarded = validate_planner_chunk(session, chunk, intent)
 
-    assert guarded.steps
-    assert guarded.steps[0].action == "click_element"
+    assert not guarded.steps
+    assert guarded.terminal == "continue"
+    assert "empty" in session.planner_nudge.lower()
 
 
 def test_allows_repeat_add_to_cart_until_target_met() -> None:

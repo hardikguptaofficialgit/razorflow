@@ -2,7 +2,13 @@
 
 from __future__ import annotations
 
-from agent_runtime.observation.browser_state import BrowserPage
+from agent_runtime.verifier.page_semantics import is_cart_page
+from agent_runtime.policy.search_state import (
+    find_goal_ready,
+    has_relevant_search_results,
+    needs_search,
+    search_entity,
+)
 from agent_runtime.state.run_state import RunState
 
 
@@ -32,11 +38,19 @@ def sync_memory_from_observation(state: RunState, page: BrowserPage | None) -> N
     spec = state.task_spec
     intent = spec.intent if spec else state.parsed_task.goal
     cart_count = _cart_count(page)
+    current_phase = state.current_phase
 
     if not memory.remaining_items and spec and spec.remaining_items:
         memory.remaining_items = list(spec.remaining_items)
 
-    if intent == "checkout":
+    if current_phase in {"checkout", "checkout_reached"} or (
+        intent == "checkout" and "ADD_PHASE_COMPLETE" in memory.constraints
+    ):
+        memory.remaining_work = [
+            "Navigate to checkout using visible checkout controls (Checkout, Proceed to checkout). "
+            "Do NOT search or add more products."
+        ]
+    elif intent == "checkout" and current_phase == "cart_updated":
         add_needed = state.parsed_task.item_count
         if cart_count >= add_needed or memory.items_added >= add_needed:
             memory.remaining_work = ["Navigate to checkout and verify checkout page or login gate"]
@@ -50,9 +64,42 @@ def sync_memory_from_observation(state: RunState, page: BrowserPage | None) -> N
                     "Then proceed to checkout",
                 ]
 
+    elif intent in {"search", "compare"}:
+        allows_add = spec.allows_add_to_cart if spec else True
+        entity = search_entity(state)
+        if needs_search(state, page):
+            query = entity or "the requested product"
+            memory.remaining_work = [f"Search for '{query}' using the search bar"]
+        elif not allows_add and has_relevant_search_results(page, state):
+            memory.remaining_work = [
+                "Relevant search results visible — inspect/compare and STOP (do not add to cart)"
+            ]
+        elif has_relevant_search_results(page, state):
+            memory.remaining_work = ["Relevant search results visible — inspect and stop or proceed per goal"]
+        elif current_phase == "product_details" and "/product" in page.path:
+            memory.remaining_work = ["Product details open — goal satisfied"]
+        else:
+            memory.remaining_work = ["Search and display relevant products"]
+
     elif intent == "add_to_cart":
         target = state.parsed_task.item_count
-        if memory.items_added >= target or cart_count >= target:
+        if (
+            spec
+            and len(spec.effective_phases()) > 1
+            and current_phase == "search_results"
+        ):
+            entity = search_entity(state)
+            if needs_search(state, page):
+                memory.remaining_work = [
+                    f"Search for '{entity or 'product'}' and compare results"
+                ]
+            elif has_relevant_search_results(page, state):
+                memory.remaining_work = [
+                    "Compare visible results, then add exactly ONE best match to cart"
+                ]
+            else:
+                memory.remaining_work = [f"Search for '{entity or 'product'}' first"]
+        elif memory.items_added >= target:
             memory.remaining_work = ["Goal satisfied — verify cart and stop"]
             memory.remaining_items = []
         elif memory.remaining_items:
@@ -66,14 +113,8 @@ def sync_memory_from_observation(state: RunState, page: BrowserPage | None) -> N
         else:
             memory.remaining_work = [f"Add {target} suitable item(s) to cart"]
 
-    elif intent in {"search", "compare"}:
-        if page.products or page.search_query or "/search" in page.path:
-            memory.remaining_work = ["Verify relevant results are visible, then stop"]
-        else:
-            memory.remaining_work = ["Search and display relevant products"]
-
     elif intent == "view_cart":
-        if "/cart" in page.path:
+        if is_cart_page(page):
             memory.remaining_work = ["Cart is open — goal satisfied"]
         else:
             memory.remaining_work = ["Open cart page"]

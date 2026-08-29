@@ -3,6 +3,11 @@
 Uses the OSS `browser_use` Agent + Tools stack with a BYO LLM:
 gemini | openrouter | groq | llamacpp. Paid ChatBrowserUse / Browser-Use cloud
 LLM is intentionally unsupported.
+
+Retry ownership lives in exactly one place: `utils.llm_resilience`. Client-level retry
+loops are switched off (`max_retries=0`) so a provider's Retry-After cannot be slept out
+ten times invisibly inside a single agent step; the resilience layer applies one bounded
+budget per provider and then fails over to the next configured provider.
 """
 
 from __future__ import annotations
@@ -15,6 +20,7 @@ from browser_use.llm.groq.chat import ChatGroq
 from browser_use.llm.openai.chat import ChatOpenAI
 from browser_use.llm.openrouter.chat import ChatOpenRouter
 
+from core.llm_failover import FailoverChatModel, ProviderSlot
 from utils.config import (
     get_gemini_api_key,
     get_gemini_model,
@@ -26,7 +32,11 @@ from utils.config import (
     get_llamacpp_model,
     get_openrouter_api_key,
     get_openrouter_model,
+    is_gemini_configured,
+    is_groq_configured,
+    is_openrouter_configured,
 )
+from utils.llm_resilience import ProviderNotConfiguredError
 
 logger = logging.getLogger(__name__)
 
@@ -36,11 +46,25 @@ _PAID_PROVIDER_MSG = (
     "Set LLM_PROVIDER=gemini|openrouter|groq|llamacpp."
 )
 
+# One HTTP attempt must finish inside this before the resilience layer retries or fails over.
+_REQUEST_TIMEOUT_SEC = 60.0
+# Failover candidate order after the configured primary.
+_FAILOVER_PREFERENCE = ("openrouter", "gemini", "groq")
 
-def create_browser_use_llm() -> BaseChatModel:
-    """Return the LLM used by the Browser Use executor (OSS BYO only)."""
-    provider = get_llm_provider()
 
+def _client_kwargs() -> dict[str, float | int]:
+    return {"timeout": _REQUEST_TIMEOUT_SEC, "max_retries": 0}
+
+
+# google-genai's HttpOptions.timeout is milliseconds, unlike the OpenAI-shaped clients.
+_GEMINI_CLIENT_KWARGS: dict[str, float | int | dict[str, int]] = {
+    "max_retries": 0,
+    "http_options": {"timeout": int(_REQUEST_TIMEOUT_SEC * 1000)},
+}
+
+
+def _build_provider_llm(provider: str) -> BaseChatModel:
+    """Construct one provider's chat model, raising if that provider is unusable."""
     if provider in {"browser_use", "chatbrowseruse", "bu"}:
         raise RuntimeError(_PAID_PROVIDER_MSG)
 
@@ -52,12 +76,7 @@ def create_browser_use_llm() -> BaseChatModel:
             )
         model = get_gemini_model()
         logger.info("Using Gemini LLM model=%s", model)
-        return ChatGoogle(
-            model=model,
-            api_key=api_key,
-            temperature=0.0,
-            max_retries=3,
-        )
+        return ChatGoogle(model=model, api_key=api_key, temperature=0.0, **_GEMINI_CLIENT_KWARGS)
 
     if provider == "llamacpp":
         base_url = get_llamacpp_base_url()
@@ -69,8 +88,8 @@ def create_browser_use_llm() -> BaseChatModel:
             api_key=get_llamacpp_api_key(),
             temperature=0.0,
             frequency_penalty=0.0,
-            max_retries=2,
-            timeout=180.0,
+            timeout=_REQUEST_TIMEOUT_SEC,
+            max_retries=0,
             add_schema_to_system_prompt=True,
             dont_force_structured_output=True,
             remove_min_items_from_schema=True,
@@ -91,8 +110,7 @@ def create_browser_use_llm() -> BaseChatModel:
             api_key=api_key,
             temperature=0.0,
             http_referer="https://razorflow.local",
-            timeout=90.0,
-            max_retries=3,
+            **_client_kwargs(),
         )
 
     if provider != "groq":
@@ -107,17 +125,54 @@ def create_browser_use_llm() -> BaseChatModel:
 
     model = get_groq_model()
     logger.info("Using Groq LLM model=%s", model)
-    return ChatGroq(
-        model=model,
-        api_key=api_key,
-        temperature=0.0,
-    )
+    return ChatGroq(model=model, api_key=api_key, temperature=0.0, **_client_kwargs())
+
+
+def create_browser_use_llm() -> BaseChatModel:
+    """Return the LLM used by the Browser Use executor (OSS BYO only)."""
+    return _build_provider_llm(get_llm_provider())
+
+
+def _is_fallback_available(provider: str) -> bool:
+    if provider == "openrouter":
+        return is_openrouter_configured()
+    if provider == "gemini":
+        return is_gemini_configured()
+    if provider == "groq":
+        return is_groq_configured()
+    return False
+
+
+def create_browser_use_llm_slots() -> list[ProviderSlot]:
+    """Ordered providers for one run: configured primary first, then failover candidates."""
+    primary = get_llm_provider()
+    ordered = [primary, *[item for item in _FAILOVER_PREFERENCE if item != primary]]
+
+    slots: list[ProviderSlot] = []
+    for index, provider in enumerate(ordered):
+        if index > 0 and not _is_fallback_available(provider):
+            continue
+        try:
+            model = _build_provider_llm(provider)
+        except Exception as error:
+            if index == 0:
+                raise
+            logger.warning("Skipping LLM failover candidate %s: %s", provider, error)
+            continue
+        slots.append(ProviderSlot(provider=provider, model=str(getattr(model, "model", provider)), llm=model))
+
+    if not slots:
+        raise ProviderNotConfiguredError(
+            "No usable LLM provider. Set OPENROUTER_API_KEY, GROQ_API_KEY or GEMINI_API_KEY, "
+            "or start llama-server."
+        )
+    return slots
 
 
 def require_browser_use_llm() -> BaseChatModel:
-    """Same as create_browser_use_llm, with clearer errors for misconfig."""
+    """Executor LLM with bounded rate-limit backoff and provider failover."""
     try:
-        return create_browser_use_llm()
+        slots = create_browser_use_llm_slots()
     except RuntimeError:
         raise
     except Exception as error:
@@ -129,11 +184,10 @@ def require_browser_use_llm() -> BaseChatModel:
                 f"Details: {error}"
             ) from error
         if provider == "openrouter":
-            raise RuntimeError(
-                f"Failed to create OpenRouter LLM client. Details: {error}"
-            ) from error
+            raise RuntimeError(f"Failed to create OpenRouter LLM client. Details: {error}") from error
         if provider == "gemini":
-            raise RuntimeError(
-                f"Failed to create Gemini LLM client. Details: {error}"
-            ) from error
+            raise RuntimeError(f"Failed to create Gemini LLM client. Details: {error}") from error
         raise
+
+    logger.info("Browser Use LLM chain: %s", " -> ".join(slot.describe() for slot in slots))
+    return FailoverChatModel(slots)  # type: ignore[return-value]

@@ -23,10 +23,10 @@ def client() -> TestClient:
 
 
 def test_start_run_routes_to_v2_runtime(client: TestClient) -> None:
-    v2_dispatch = AsyncMock()
-    with patch("core.bridge_server.is_browser_use_executor_enabled", return_value=False):
+    v2_start = AsyncMock()
+    with patch("core.bridge_server.is_browser_use_executor_enabled", return_value=True):
         with patch("core.bridge_server.is_agent_runtime_v2_enabled", return_value=True):
-            with patch("agent_runtime.bridge.adapter.dispatch_next", v2_dispatch):
+            with patch("agent_runtime.bridge.adapter.handle_start_run", v2_start):
                 with client.websocket_connect("/ws") as websocket:
                     websocket.send_json(
                         {
@@ -43,5 +43,6 @@ def test_start_run_routes_to_v2_runtime(client: TestClient) -> None:
                     )
                     first = json.loads(websocket.receive_text())
                     assert first["type"] == "EXECUTOR_MODE"
+                    assert first["mode"] == "extension_dom"
 
-    v2_dispatch.assert_awaited_once()
+    v2_start.assert_awaited_once()

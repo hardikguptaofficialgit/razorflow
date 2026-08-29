@@ -1,4 +1,4 @@
-"""Deterministic goal verification."""
+"""Deterministic goal verification — runtime owns completion, not the LLM."""
 
 from __future__ import annotations
 
@@ -7,7 +7,11 @@ from urllib.parse import urlparse
 
 from agent_runtime.observation.browser_state import BrowserPage
 from agent_runtime.state.run_state import RunState
-from agent_runtime.task.parser import ParsedTask
+from agent_runtime.task.spec import GoalPhase
+from agent_runtime.verifier.cart import cart_satisfies_add_goal
+from agent_runtime.verifier.checkout_flow import is_checkout_flow_page, next_param_points_to_checkout
+from agent_runtime.verifier.page_semantics import is_cart_page, is_product_details_page, is_search_results_page
+from agent_runtime.policy.search_state import entity_in_search, search_entity
 
 
 def _path(url: str) -> str:
@@ -17,101 +21,143 @@ def _path(url: str) -> str:
         return ""
 
 
-def _price_inr(text: str) -> float | None:
-    match = re.search(r"(?:₹|rs\.?)\s*([\d,]+(?:\.\d+)?)", text, re.I)
-    if not match:
-        match = re.search(r"([\d,]+(?:\.\d+)?)", text)
-    if not match:
-        return None
-    try:
-        return float(match.group(1).replace(",", ""))
-    except ValueError:
-        return None
+def _is_product_page(path: str) -> bool:
+    return "/product" in path
 
 
-def _cart_count(page: BrowserPage) -> int:
-    if page.cart_lines:
-        return sum(line.quantity for line in page.cart_lines)
-    return 0
+def _is_search_page(page: BrowserPage) -> bool:
+    return is_search_results_page(page)
 
 
-def is_goal_satisfied(state: RunState, page: BrowserPage | None) -> bool:
-    if page is None:
-        return False
+def _has_results(page: BrowserPage) -> bool:
+    return is_search_results_page(page) and bool(page.products or page.search_query)
 
-    task = state.parsed_task
-    goal = task.goal
 
-    if goal == "search":
-        return bool(
-            state.milestones.intersection({"verified_search"})
-            and (page.search_query or "/search" in page.path or page.products)
+def phase_satisfied(phase: GoalPhase, state: RunState, page: BrowserPage) -> bool:
+    return _phase_satisfied(phase, state, page)
+
+
+def _phase_satisfied(phase: GoalPhase, state: RunState, page: BrowserPage) -> bool:
+    if phase == "search_results":
+        if is_product_details_page(page):
+            return False
+        on_results = _has_results(page) and is_search_results_page(page)
+        progress = (
+            "verified_search" in state.milestones
+            or state.verified_progress_count >= 1
+        )
+        spec = state.task_spec
+        entity = search_entity(state) if spec else ""
+        if (
+            spec
+            and spec.intent in {"search", "compare"}
+            and not spec.allows_add_to_cart
+            and entity
+        ):
+            if not entity_in_search(page, entity):
+                return False
+        if (
+            spec
+            and spec.intent == "add_to_cart"
+            and len(spec.effective_phases()) > 1
+            and on_results
+            and progress
+        ):
+            return True
+        return on_results and progress
+
+    if phase == "product_details":
+        return is_product_details_page(page) and state.verified_progress_count >= 1
+
+    if phase == "cart_updated":
+        return cart_satisfies_add_goal(state, page) and (
+            "verified_add_to_cart" in state.milestones
+            or state.verified_progress_count >= 1
         )
 
-    if goal in {"compare", "browse"}:
-        return "verified_search" in state.milestones and bool(page.products or page.search_query)
+    if phase == "cart_visible":
+        return is_cart_page(page)
 
-    if goal == "view_cart":
-        return (
-            "/cart" in page.path
-            or "cart_page" in page.signals
-            or "reached_cart" in state.milestones
-        )
+    if phase in {"checkout", "checkout_reached"}:
+        return is_checkout_flow_page(page)
 
-    if goal in {"checkout", "purchase"}:
-        return (
-            "reached_checkout" in state.milestones
-            or (
-                (
-                    "checkout_page" in page.signals
-                    or "login_required" in page.signals
-                    or "/checkout" in page.path
-                    or "auth=login" in page.url.lower()
-                )
-                and state.verified_progress_count >= 1
-            )
-        )
+    if phase == "purchase_reached":
+        return _phase_satisfied("checkout_reached", state, page)
 
-    if goal == "remove":
+    if phase == "item_removed":
+        task = state.parsed_task
         if task.remove_target:
             needle = task.remove_target.lower()
             for line in page.cart_lines:
                 if needle in line.title.lower():
                     return False
-        return "/cart" in page.path and state.memory.items_added >= 0
-
-    if goal == "add_to_cart":
-        return state.memory.items_added >= task.item_count
+        return "verified_remove" in state.milestones
 
     return False
 
 
-def milestones_met(state: RunState) -> bool:
-    task = state.parsed_task
-    if task.goal == "search":
+def _milestones_met(phase: GoalPhase, state: RunState) -> bool:
+    if phase == "search_results":
         return "verified_search" in state.milestones
-    if task.goal == "add_to_cart":
+    if phase == "product_details":
+        return "verified_search" in state.milestones and _is_product_page(
+            state.memory.current_page.path if state.memory.current_page else ""
+        )
+    if phase == "cart_updated":
         return (
-            state.memory.items_added >= task.item_count
+            cart_satisfies_add_goal(state, state.memory.current_page)
             and "verified_add_to_cart" in state.milestones
         )
-    if task.goal == "view_cart":
+    if phase == "cart_visible":
         return "reached_cart" in state.milestones
-    if task.goal in {"checkout", "purchase"}:
+    if phase in {"checkout", "checkout_reached", "purchase_reached"}:
         return "reached_checkout" in state.milestones
-    if task.goal == "remove":
-        return "reached_cart" in state.milestones
+    if phase == "item_removed":
+        return "verified_remove" in state.milestones
     return state.verified_progress_count > 0
+
+
+def is_goal_satisfied(state: RunState, page: BrowserPage | None) -> bool:
+    if page is None or state.task_spec is None:
+        return False
+    spec = state.task_spec
+    phases = spec.effective_phases()
+    if len(phases) > 1:
+        if state.current_phase != phases[-1]:
+            return False
+        return _phase_satisfied(state.current_phase, state, page)
+    return _phase_satisfied(spec.target_phase, state, page)
+
+
+def milestones_met(state: RunState) -> bool:
+    spec = state.task_spec
+    if spec is None:
+        return False
+    phases = spec.effective_phases()
+    phase = state.current_phase if len(phases) > 1 else spec.target_phase
+    return _milestones_met(phase, state)
 
 
 def approve_completion(state: RunState, page: BrowserPage | None, *, source: str) -> bool:
     if page is None:
         return False
-    if state.verified_progress_count < 1 and state.parsed_task.goal not in {
-        "search",
-        "compare",
-        "view_cart",
-    }:
+
+    from agent_runtime.policy.search_state import find_goal_ready
+
+    if find_goal_ready(state, page):
+        state.milestones.add("verified_search")
+        state.metrics["completion_source"] = source
+        return True
+
+    phase = state.current_phase if state.task_spec and len(state.task_spec.effective_phases()) > 1 else (
+        state.task_spec.target_phase if state.task_spec else "search_results"
+    )
+    exempt_from_progress = phase in {
+        "search_results",
+        "product_details",
+        "cart_visible",
+    }
+    if state.verified_progress_count < 1 and not exempt_from_progress:
         return False
     if not is_goal_satisfied(state, page):
         return False
@@ -122,11 +168,10 @@ def approve_completion(state: RunState, page: BrowserPage | None, *, source: str
 
 
 def update_milestones(state: RunState, page: BrowserPage | None) -> None:
+    """Passive observation only records navigational hints — not verified progress."""
     if page is None:
         return
-    if page.search_query or "/search" in page.path:
-        state.milestones.add("verified_search")
-    if "/cart" in page.path:
+    if is_cart_page(page):
         state.milestones.add("reached_cart")
-    if "/checkout" in page.path or "login_required" in page.signals:
+    if is_checkout_flow_page(page):
         state.milestones.add("reached_checkout")

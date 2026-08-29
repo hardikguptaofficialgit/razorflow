@@ -10,8 +10,11 @@ _BACKEND_ROOT = Path(__file__).resolve().parent
 
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
+if str(_BACKEND_ROOT) not in sys.path:
+    sys.path.insert(0, str(_BACKEND_ROOT))
 
 load_dotenv(_REPO_ROOT / ".env")
+load_dotenv(_REPO_ROOT / ".env.test", override=True)  # Prefer .env.test for testing
 load_dotenv(_BACKEND_ROOT / ".env", override=True)
 
 logging.basicConfig(level=logging.INFO)

@@ -1,7 +1,7 @@
-# @strykerinside/razorflow-browser
+# @hardik21232323/razorflow-browser
 
 Browser environment contract and generic DOM observation utilities.
 
 ```typescript
-import { buildBrowserObservation, type BrowserEnvironment } from "@strykerinside/razorflow-browser";
+import { buildBrowserObservation, type BrowserEnvironment } from "@hardik21232323/razorflow-browser";
 ```

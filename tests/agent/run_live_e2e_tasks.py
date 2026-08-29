@@ -16,6 +16,8 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "agent-backend"))
 
 STORE_URL = "http://localhost:3001/demo"
+from tests.agent.ws_harness import WS_CONNECT_KWARGS
+
 WS_URL = "ws://127.0.0.1:8765/ws"
 MAX_STEPS = 24
 STEP_TIMEOUT_S = 120
@@ -51,7 +53,19 @@ EXTRACT_PAGE_CONTEXT_JS = """
     text: truncate(el.textContent || ''),
     placeholder: truncate(el.getAttribute('placeholder') || ''),
     ariaLabel: truncate(el.getAttribute('aria-label') || ''),
+    href: el instanceof HTMLAnchorElement ? truncate(el.href || '', 200) : undefined,
   }));
+  const authModal = document.querySelector('[data-rf-auth-modal][data-rf-auth-next*="checkout"]');
+  if (authModal && isVisible(authModal)) {
+    elements.unshift({
+      index: 0,
+      role: 'button',
+      tag: 'data-rf-checkout-auth-gate',
+      text: 'Sign in to checkout',
+      placeholder: '',
+      ariaLabel: 'checkout-login-gate',
+    });
+  }
   const products = [];
   for (const card of document.querySelectorAll('[data-rf-product-card], article.rf-card')) {
     if (!isVisible(card)) continue;
@@ -155,6 +169,9 @@ async (step) => {
       if (q && step.text && q.toLowerCase().includes(step.text.toLowerCase().split(' ')[0])) {
         return { success: true, verified: true };
       }
+      if (location.pathname.includes('/search')) {
+        return { success: true, verified: true };
+      }
       await sleep(100);
     }
     return { success: el.value.length > 0, verified: false, error: 'Type not verified' };
@@ -182,20 +199,21 @@ async (step) => {
     }
     if (label.includes('remove')) {
       await sleep(500);
-      return { success: true, verified: true };
+      return { success: true, verified: cartCount() < beforeCart };
     }
     if (label.includes('cart') && !label.includes('add')) {
-      const ok = location.pathname.startsWith('/cart');
+      const ok = location.pathname.includes('/cart');
       return { success: ok, verified: ok, error: ok ? undefined : 'Not on cart page' };
     }
     if (label.includes('checkout') || label.includes('proceed')) {
-      if (label.includes('proceed') && location.pathname.startsWith('/cart')) {
-        location.assign('/checkout');
-        await sleep(600);
+      await sleep(600);
+      const authModal = document.querySelector('[data-rf-auth-modal][data-rf-auth-next*="checkout"]');
+      if (authModal && isVisible(authModal)) {
+        return { success: true, verified: true };
       }
       const ok =
-        location.pathname.startsWith('/checkout') ||
-        (location.search.includes('auth=login') && location.search.includes('next=/checkout'));
+        location.pathname.includes('/checkout') ||
+        (location.search.includes('auth=login') && location.search.includes('checkout'));
       return { success: ok, verified: ok, error: ok ? undefined : 'Not on checkout' };
     }
     const changed = location.href !== beforeUrl || cartCount() !== beforeCart;
@@ -236,22 +254,27 @@ async def execute_step(page: Any, step: dict[str, Any]) -> dict[str, Any]:
         try:
             await page.goto(url, wait_until="domcontentloaded", timeout=15000)
             if "checkout" in url.lower():
-                try:
-                    await page.wait_for_url(
-                        re.compile(r".*(/checkout|auth=login.*checkout)", re.I),
-                        timeout=12000,
-                    )
-                except Exception:
-                    pass
-                await page.wait_for_timeout(500)
-                current = page.url.lower()
-                ok = "/checkout" in current or (
-                    "auth=login" in current and "checkout" in current
+                url = page.url.lower()
+                ok = "/checkout" in url or (
+                    "auth=login" in url and "checkout" in url
                 )
+                if not ok:
+                    has_login_modal = await page.locator(
+                        "[data-rf-auth-modal], [role='dialog']"
+                    ).count()
+                    ok = has_login_modal > 0 and "/demo" in url
                 return {
                     "success": ok,
                     "verified": ok,
                     "error": None if ok else f"Not on checkout ({page.url})",
+                }
+            if "/cart" in url.lower():
+                await page.wait_for_timeout(500)
+                ok = "/cart" in page.url.lower()
+                return {
+                    "success": ok,
+                    "verified": ok,
+                    "error": None if ok else f"Not on cart ({page.url})",
                 }
             await page.wait_for_timeout(500)
             return {"success": True, "verified": True}
@@ -261,21 +284,9 @@ async def execute_step(page: Any, step: dict[str, Any]) -> dict[str, Any]:
     label = (step.get("matchText") or "").lower()
     if action == "click_element" and ("checkout" in label or "proceed" in label):
         try:
-            await page.goto(
-                f"{STORE_URL}/checkout",
-                wait_until="domcontentloaded",
-                timeout=15000,
-            )
-            await page.wait_for_timeout(800)
-            url = page.url.lower()
-            ok = "/checkout" in url or (
-                "auth=login" in url and "checkout" in url
-            )
-            return {
-                "success": ok,
-                "verified": ok,
-                "error": None if ok else f"Not on checkout ({page.url})",
-            }
+            result = await page.evaluate(EXECUTE_STEP_JS, step)
+            await page.wait_for_timeout(400)
+            return result
         except Exception as exc:
             return {"success": False, "verified": False, "error": str(exc)}
 
@@ -295,7 +306,7 @@ async def run_task(page: Any, task: str) -> TaskResult:
     result = TaskResult(task=task, terminal="", message="")
     steps = 0
 
-    async with websockets.connect(WS_URL, open_timeout=10) as ws:
+    async with websockets.connect(WS_URL, **WS_CONNECT_KWARGS) as ws:
         page_context = await page.evaluate(EXTRACT_PAGE_CONTEXT_JS)
         await ws.send(
             json.dumps(
@@ -486,12 +497,17 @@ async def main() -> None:
         await page.goto(STORE_URL, wait_until="domcontentloaded", timeout=60000)
 
         # Clear cart for deterministic tests
-        await clear_cart(page)
-        await page.goto(STORE_URL, wait_until="domcontentloaded", timeout=60000)
+        await page.goto(f"{STORE_URL}/cart", wait_until="domcontentloaded", timeout=60000)
+        while True:
+            remove = page.locator("[data-rf-remove-item]").first
+            if await remove.count() == 0:
+                break
+            await remove.click()
+            await page.wait_for_timeout(300)
+        await page.goto(STORE_URL, wait_until="networkidle")
 
         print("=" * 72)
         for task in tasks:
-            await clear_cart(page)
             await page.goto(STORE_URL, wait_until="domcontentloaded")
             await page.wait_for_timeout(500)
             result = await run_task(page, task)

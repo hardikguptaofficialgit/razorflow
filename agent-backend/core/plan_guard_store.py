@@ -7,6 +7,7 @@ import re
 from dataclasses import replace
 from urllib.parse import quote, urlparse
 
+from core.generic_utils import detect_auth_page, url_origin
 from core.heuristics import _already_searched_for, _url_search_query
 from core.product_compare import select_best_product
 from core.protocol import (
@@ -19,7 +20,7 @@ from core.protocol import (
 from core.run_manager import RunSession
 from core.search_query import alternate_search_query, search_queries_equivalent
 from core.shopping_intent import parse_shopping_intent
-from core.store_planner import _store_origin, is_razorflow_store_url
+from core.store_planner import is_razorflow_store_url
 from core.task_intent import (
     complete_chunk,
     count_successful_adds,
@@ -124,20 +125,13 @@ def _handle_empty_search(
 
 
 def page_requires_login(page) -> bool:
-    url = (page.url or "").lower()
-    title = (page.title or "").lower()
-    blob = f"{url} {title}"
-    if "auth=login" in url or "/login" in url:
-        return True
-    if "sign in to checkout" in blob or "sign in to continue" in blob:
-        return True
-    if page.elements and any(
-        getattr(el, "tag", "") == "data-rf-auth-required" for el in page.elements
-    ):
-        return True
-    if re.search(r"sign[\s-]?in|log[\s-]?in", blob):
-        return bool(re.search(r"checkout|account|order", blob))
-    return False
+    """Use generic auth detection from utilities."""
+    is_auth, _reason = detect_auth_page(
+        page.url or "",
+        page.title or "",
+        page.elements or [],
+    )
+    return is_auth
 
 
 def _is_home_path(path: str) -> bool:
@@ -190,7 +184,7 @@ def _session_has_cart_items(session: RunSession) -> bool:
 
 
 def _navigate_search(page, query: str) -> PlannerChunkOutput:
-    origin = _store_origin(page.url)
+    origin = url_origin(page.url)
     search_url = f"{origin}/search?q={quote(query)}"
     return PlannerChunkOutput(
         steps=[NavigateUrlStep(action="navigate_url", url=search_url)],
@@ -199,7 +193,7 @@ def _navigate_search(page, query: str) -> PlannerChunkOutput:
 
 
 def _navigate_checkout(page) -> PlannerChunkOutput:
-    origin = _store_origin(page.url)
+    origin = url_origin(page.url)
     return PlannerChunkOutput(
         steps=[NavigateUrlStep(action="navigate_url", url=f"{origin}/checkout")],
         terminal="continue",
@@ -407,7 +401,7 @@ def apply_store_dom_guard(
 
     if task_intent.goal == "view_cart" and not path.startswith("/cart"):
         logger.info("Store guard: open cart runId=%s", session.run_id)
-        origin = _store_origin(page.url)
+        origin = url_origin(page.url)
         return PlannerChunkOutput(
             steps=[NavigateUrlStep(action="navigate_url", url=f"{origin}/cart")],
             terminal="continue",
@@ -415,7 +409,7 @@ def apply_store_dom_guard(
 
     if task_intent.goal == "remove" and not path.startswith("/cart"):
         logger.info("Store guard: cart for remove runId=%s", session.run_id)
-        origin = _store_origin(page.url)
+        origin = url_origin(page.url)
         return PlannerChunkOutput(
             steps=[NavigateUrlStep(action="navigate_url", url=f"{origin}/cart")],
             terminal="continue",

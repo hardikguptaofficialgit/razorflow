@@ -1,11 +1,12 @@
-"""Deterministic fast-path planner for RazorFlow Market (fake-store)."""
+"""Deterministic fast-path planner - now pattern-based (not URL-gated)."""
 
 from __future__ import annotations
 
 import logging
 import re
-from urllib.parse import quote, urlparse
+from urllib.parse import quote
 
+from core.generic_utils import url_origin
 from core.heuristics import _already_searched_for, _needs_fresh_search, _url_search_query
 from core.protocol import NavigateUrlStep, PlannerChunkOutput
 from core.run_manager import RunSession
@@ -22,6 +23,8 @@ _SHOP_HINT = re.compile(
 
 
 def is_razorflow_store_url(url: str) -> bool:
+    """DEPRECATED: Kept for backward compatibility. Use pattern-based detection instead."""
+    from urllib.parse import urlparse
     if not url.strip():
         return False
     try:
@@ -34,16 +37,25 @@ def is_razorflow_store_url(url: str) -> bool:
     return "razorflow" in host
 
 
-def _store_origin(url: str) -> str:
-    parsed = urlparse(url)
-    return f"{parsed.scheme}://{parsed.netloc}"
+# _store_origin removed - use core.generic_utils.url_origin instead
 
 
 def try_store_fast_plan(session: RunSession) -> PlannerChunkOutput | None:
-    """Skip LLM when we can jump straight to a known store route."""
+    """
+    Optional fast-path for known patterns.
+    DEPRECATED: This is now optional and should only be used for specific optimizations.
+    The core agent should work without any URL-specific fast-paths.
+    """
     page = session.latest_page_context
-    if page is None or not is_razorflow_store_url(page.url):
+    if page is None:
         return None
+
+    # Only use fast-path if explicitly enabled and on a known pattern
+    # For now, keep the RazorFlow check for backward compatibility
+    # but this should be removed or made configurable
+    if not is_razorflow_store_url(page.url):
+        return None
+
     task_intent = parse_task_intent(session.task)
     if task_intent.goal in {"view_cart", "remove", "update_cart"}:
         return None
@@ -55,6 +67,7 @@ def try_store_fast_plan(session: RunSession) -> PlannerChunkOutput | None:
     if not query:
         return None
 
+    from urllib.parse import urlparse
     parsed = urlparse(page.url)
     path = parsed.path.lower()
     url_query = _url_search_query(page.url)
@@ -84,7 +97,7 @@ def try_store_fast_plan(session: RunSession) -> PlannerChunkOutput | None:
     if searched and on_search and url_query.lower() == query.lower():
         return None
 
-    origin = _store_origin(page.url)
+    origin = url_origin(page.url)
     search_url = f"{origin}/search?q={quote(query)}"
     logger.info(
         "Store fast path: navigate search runId=%s query=%s",

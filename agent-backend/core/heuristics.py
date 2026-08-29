@@ -6,6 +6,13 @@ import logging
 import re
 from urllib.parse import parse_qs, urlparse
 
+from core.generic_utils import (
+    detect_auth_page,
+    get_element_index,
+    normalize_element_label,
+    parse_money_value,
+    url_origin,
+)
 from core.protocol import (
     ClickElementStep,
     NavigateUrlStep,
@@ -67,15 +74,13 @@ _TASK_STOPWORDS = {
 
 
 def _element_label(element: PageElementSummary) -> str:
-    return " ".join(
-        part
-        for part in (element.text, element.placeholder, element.aria_label)
-        if part
-    ).lower()
+    """Use generic utility for element label extraction."""
+    return normalize_element_label(element)
 
 
 def _indexed(element: PageElementSummary, position: int) -> int:
-    return element.index if element.index > 0 else position
+    """Use generic utility for element index extraction."""
+    return get_element_index(element, position)
 
 
 def _find_element(
@@ -95,13 +100,9 @@ def _find_element(
 
 
 def _url_search_query(url: str) -> str:
-    parsed = urlparse(url)
-    query = parse_qs(parsed.query)
-    for key in ("q", "k", "query", "search"):
-        values = query.get(key)
-        if values and values[0].strip():
-            return values[0].strip()
-    return ""
+    """Use generic utility for URL query extraction."""
+    from core.generic_utils import extract_url_query
+    return extract_url_query(url)
 
 
 def _results_look_wrong(page: PageContext, query: str) -> bool:
@@ -158,13 +159,8 @@ def _filter_products_for_task(
 
 
 def _parse_price(price_text: str) -> float | None:
-    match = _PRICE_VALUE.search(price_text.replace(",", ""))
-    if not match:
-        return None
-    try:
-        return float(match.group(0))
-    except ValueError:
-        return None
+    """Use generic utility for price parsing."""
+    return parse_money_value(price_text)
 
 
 def _parse_rating(rating_text: str | None) -> float | None:

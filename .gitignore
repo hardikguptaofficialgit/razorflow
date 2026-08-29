@@ -9,6 +9,9 @@ node_modules/
 .env.*.local
 .npmrc
 
+# Keep .env.test for testing (not secrets)
+!.env.test
+
 # Python
 __pycache__/
 *.py[cod]
@@ -47,4 +50,18 @@ Thumbs.db
 # Local LLM weights
 models/
 *.gguf
+
+# Local tooling
+.tools/
+
+# Runtime logs (append-only, not versioned)
+agent-backend/logs/
+
+# Ephemeral test run outputs
+tests/agent/benchmark_*.txt
+tests/agent/*_run_latest.txt
+tests/agent/real_ui_results.json
+tests/agent/real_ui_agent_output.txt
+tests/agent/autonomy_stress_results.json
+tests/agent/general_web_results.txt
 

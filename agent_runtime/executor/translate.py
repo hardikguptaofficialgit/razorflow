@@ -8,10 +8,13 @@ from agent_runtime.executor.actions import AgentAction
 from core.protocol import (
     ActionStep,
     ClickElementStep,
+    GoBackStep,
     HighlightElementStep,
     NavigateUrlStep,
+    ScrollPageStep,
     TypeInElementStep,
     WaitForUserStep,
+    WaitStep,
 )
 
 _ELEMENT_ID_RE = re.compile(r"^e(\d+)$", re.I)
@@ -29,8 +32,10 @@ def _element_index(action: AgentAction) -> int | None:
 def _role(action: AgentAction) -> str:
     if action.target and action.target.role:
         return action.target.role
-    if action.type in {"search", "type"}:
+    if action.type == "search":
         return "search"
+    if action.type == "type":
+        return "input"
     return "button"
 
 
@@ -62,7 +67,16 @@ def translate_action(action: AgentAction) -> list[ActionStep]:
         return [NavigateUrlStep(action="navigate_url", url=url)]
 
     if action.type == "go_back":
-        return []
+        return [GoBackStep(action="go_back")]
+
+    if action.type == "wait":
+        duration = action.parameters.get("duration_ms") or action.parameters.get("ms") or 500
+        try:
+            ms = int(duration)
+        except (TypeError, ValueError):
+            ms = 500
+        ms = max(100, min(5000, ms))
+        return [WaitStep(action="wait", durationMs=ms)]
 
     if action.type in {"search", "type"}:
         text = str(
@@ -93,6 +107,15 @@ def translate_action(action: AgentAction) -> list[ActionStep]:
         ]
 
     if action.type == "scroll":
+        direction = str(action.parameters.get("direction", "down")).lower()
+        if direction not in {"up", "down", "top", "bottom"}:
+            direction = "down"
+        amount = action.parameters.get("amount_px") or action.parameters.get("amount") or 600
+        try:
+            amount_px = int(amount)
+        except (TypeError, ValueError):
+            amount_px = 600
+        amount_px = max(100, min(2000, amount_px))
         if idx is not None:
             return [
                 HighlightElementStep(
@@ -102,9 +125,12 @@ def translate_action(action: AgentAction) -> list[ActionStep]:
                     matchText=match,
                 )
             ]
-        return []
-
-    if action.type == "wait":
-        return []
+        return [
+            ScrollPageStep(
+                action="scroll_page",
+                direction=direction,  # type: ignore[arg-type]
+                amountPx=amount_px,
+            )
+        ]
 
     return []

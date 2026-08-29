@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any, Awaitable, Callable
 
@@ -26,20 +27,29 @@ logger = logging.getLogger(__name__)
 
 SendJson = Callable[[dict[str, Any]], Awaitable[None]]
 
-_runtime = AgentRuntime()
+_runtime: AgentRuntime | None = None
 _v2_run_ids: set[str] = set()
 
 
 def get_runtime() -> AgentRuntime:
+    global _runtime
+    if _runtime is None:
+        _runtime = AgentRuntime()
     return _runtime
+
+
+def reset_runtime() -> None:
+    """Test hook: rebuild runtime (e.g. after setting AGENT_LLM_TEST_FIXTURE)."""
+    global _runtime
+    _runtime = AgentRuntime()
+
+
+def get_v2_state(run_id: str) -> RunState | None:
+    return get_runtime().get_run(run_id)
 
 
 def is_v2_run(run_id: str) -> bool:
     return run_id in _v2_run_ids
-
-
-def get_v2_state(run_id: str) -> RunState | None:
-    return _runtime.get_run(run_id)
 
 
 async def handle_start_run(
@@ -48,7 +58,8 @@ async def handle_start_run(
     session,
     message: StartRunMessage,
 ) -> None:
-    state = _runtime.start_run(
+    state = await asyncio.to_thread(
+        get_runtime().start_run,
         message.run_id,
         message.task,
         message.page_context,
@@ -77,7 +88,7 @@ async def handle_action_result(
     message: ActionResultMessage,
 ) -> None:
     session = run_manager.get_run(message.run_id)
-    state = _runtime.get_run(message.run_id)
+    state = get_runtime().get_run(message.run_id)
     if session is None or state is None:
         return
 
@@ -95,7 +106,8 @@ async def handle_action_result(
         message.verified,
     )
 
-    result = _runtime.record_result(
+    result = await asyncio.to_thread(
+        get_runtime().record_result,
         state,
         action,
         success=message.success,
@@ -103,6 +115,9 @@ async def handle_action_result(
         error=message.error,
         page_context=message.page_context,
     )
+    last = state.action_history[-1] if state.action_history else None
+    if last and last.verified is True and not message.success:
+        session.consecutive_failures = 0
     if result.kind == "continue" and not result.steps:
         await dispatch_next(send_json, run_manager, session)
         return
@@ -116,7 +131,7 @@ async def handle_resume_run(
     page_context: PageContext | None,
 ) -> bool:
     session = run_manager.resume_run(run_id, page_context)
-    state = _runtime.resume_run(run_id, page_context)
+    state = get_runtime().resume_run(run_id, page_context)
     if session is None or state is None:
         return False
     await dispatch_next(send_json, run_manager, session)
@@ -124,7 +139,7 @@ async def handle_resume_run(
 
 
 async def handle_cancel(run_id: str) -> None:
-    _runtime.cancel_run(run_id)
+    get_runtime().cancel_run(run_id)
     _v2_run_ids.discard(run_id)
 
 
@@ -133,7 +148,7 @@ async def dispatch_next(
     run_manager: RunManager,
     session,
 ) -> None:
-    state = _runtime.get_run(session.run_id)
+    state = get_runtime().get_run(session.run_id)
     if state is None:
         return
 
@@ -149,7 +164,11 @@ async def dispatch_next(
         )
         return
 
-    result = _runtime.dispatch_next(state, session.latest_page_context)
+    result = await asyncio.to_thread(
+        get_runtime().dispatch_next,
+        state,
+        session.latest_page_context,
+    )
     await _apply_dispatch(send_json, run_manager, session, state, result)
 
 

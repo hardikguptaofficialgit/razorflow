@@ -7,7 +7,7 @@ import type {
   ActionStep,
   BrowserObservation,
   PageContextWire,
-} from "@strykerinside/razorflow-protocol";
+} from "@hardik21232323/razorflow-protocol";
 
 export interface StepResult {
   success: boolean;

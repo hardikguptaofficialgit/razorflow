@@ -6,11 +6,13 @@ import time
 
 from agent_runtime.events.trace import emit_trace
 from agent_runtime.executor.actions import AgentAction, PlannerOutput
-from agent_runtime.memory.task_memory import TaskMemory
-from agent_runtime.observation.browser_state import BrowserPage, format_observation
+from agent_runtime.observation.browser_state import BrowserPage
+from agent_runtime.planner.context import build_observation_block
+from agent_runtime.planner.diagnostics import emit_planner_diagnostics
 from agent_runtime.planner.llm_provider import LLMProvider
 from agent_runtime.planner.prompts import SYSTEM_PROMPT, build_user_prompt
 from agent_runtime.policy.action_gate import filter_forbidden_actions
+from agent_runtime.policy.goal_guard import filter_non_advancing_actions
 from agent_runtime.state.run_state import RunState
 from agent_runtime.task.parser import ParsedTask
 
@@ -27,25 +29,74 @@ class LLMPlanner:
         screenshot_data_url: str | None = None,
     ) -> PlannerOutput:
         started = time.perf_counter()
-        spec_block = state.task_spec.to_prompt_block() if state.task_spec else ""
+        spec_block = (
+            state.task_spec.to_prompt_block(current_phase=state.current_phase)
+            if state.task_spec
+            else ""
+        )
         verified = _verified_progress_block(state)
         user_prompt = build_user_prompt(
             task=state.task,
             task_spec_block=spec_block,
             task_summary=state.parsed_task.summary(),
             memory_block=state.memory.to_prompt_block(),
-            observation_block=format_observation(page),
+            observation_block=build_observation_block(state, page),
             verified_block=verified,
             nudge=state.planner_nudge,
         )
-        output = self._provider.plan(
-            SYSTEM_PROMPT,
-            user_prompt,
-            screenshot_data_url=screenshot_data_url,
-        )
+        raw_output: str | None = None
+        schema_result: PlannerOutput | None = None
+        gate_blocked: list[str] = []
+        try:
+            if hasattr(self._provider, "plan_with_raw"):
+                output, raw_output = self._provider.plan_with_raw(  # type: ignore[attr-defined]
+                    SYSTEM_PROMPT,
+                    user_prompt,
+                    screenshot_data_url=screenshot_data_url,
+                )
+            else:
+                output = self._provider.plan(
+                    SYSTEM_PROMPT,
+                    user_prompt,
+                    screenshot_data_url=screenshot_data_url,
+                )
+            schema_result = output
+        except Exception as exc:
+            emit_planner_diagnostics(
+                state.run_id,
+                step=state.step,
+                user_prompt=user_prompt,
+                raw_output=raw_output,
+                schema_result=None,
+                normalized_actions=[],
+                gate_blocked=[],
+                final_actions=[],
+                error=str(exc),
+            )
+            raise
+        normalized = list(output.actions)
         output.actions = _filter_blocked(state, output.actions)
         if state.task_spec:
-            output.actions, _ = filter_forbidden_actions(state.task_spec, output.actions)
+            output.actions, gate_blocked = filter_forbidden_actions(
+                state.task_spec,
+                output.actions,
+                current_phase=state.current_phase,
+                state=state,
+            )
+            output.actions, guard_blocked = filter_non_advancing_actions(state, output.actions)
+            gate_blocked = gate_blocked + guard_blocked
+            if state.current_phase == "search_results":
+                output.actions = output.actions[:1]
+        emit_planner_diagnostics(
+            state.run_id,
+            step=state.step,
+            user_prompt=user_prompt,
+            raw_output=raw_output,
+            schema_result=schema_result,
+            normalized_actions=normalized,
+            gate_blocked=gate_blocked,
+            final_actions=output.actions,
+        )
         duration_ms = int((time.perf_counter() - started) * 1000)
         emit_trace(
             state.run_id,
@@ -90,5 +141,16 @@ def _verified_progress_block(state: RunState) -> str:
         lines.append("- completed:")
         lines.extend(f"  • {step}" for step in state.memory.completed_steps[-6:])
     if state.task_spec:
+        lines.append(f"- current_phase: {state.current_phase}")
+        if state.completed_phases:
+            lines.append("- completed_phases: " + ", ".join(state.completed_phases))
+        remaining = state.task_spec.effective_phases()
+        try:
+            idx = remaining.index(state.current_phase)
+            tail = remaining[idx:]
+            if tail:
+                lines.append("- remaining_phases: " + ", ".join(tail))
+        except ValueError:
+            pass
         lines.append(f"- target_state: {state.task_spec.target_state}")
     return "\n".join(lines)

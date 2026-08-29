@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Literal
 
 from agent_runtime.executor.actions import AgentAction
 from agent_runtime.memory.task_memory import TaskMemory
 from agent_runtime.state.phase import RuntimePhase
+from agent_runtime.task.spec import GoalPhase
 from agent_runtime.task.parser import ParsedTask
 from agent_runtime.task.spec import TaskSpec
 
@@ -51,6 +52,9 @@ class RunState:
     last_chat_message: str = ""
     planner_nudge: str = ""
     empty_plan_retries: int = 0
+    planner_parse_retries: int = 0
+    current_phase: GoalPhase = "search_results"
+    completed_phases: list[GoalPhase] = field(default_factory=list)
     blocked_signatures: set[str] = field(default_factory=set)
     metrics: dict[str, Any] = field(default_factory=dict)
     connection_id: str = ""

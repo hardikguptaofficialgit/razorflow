@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>DOM Recovery Scenarios</title>
+  <style>
+    body { font-family: system-ui, sans-serif; margin: 1.5rem; }
+    #banner { display: none; position: fixed; bottom: 0; left: 0; right: 0; background: #222; color: #fff; padding: 1rem; }
+    #modal { display: none; position: fixed; inset: 0; background: rgba(0,0,0,.4); align-items: center; justify-content: center; }
+    #modal .box { background: #fff; padding: 1rem 1.5rem; border-radius: 8px; }
+    button { margin: .25rem; }
+  </style>
+</head>
+<body>
+  <h1>DOM Recovery Fixture</h1>
+  <p id="status">Ready</p>
+  <button id="primary" data-rf-interactive>Submit order</button>
+  <button id="duplicate" data-rf-interactive>Submit order</button>
+  <div id="modal"><div class="box"><p>Cookie consent</p><button id="accept-cookies">Accept</button></div></div>
+  <div id="banner"><span>We use cookies</span> <button id="dismiss-banner">Dismiss</button></div>
+  <script>
+    const status = document.getElementById('status');
+    const primary = document.getElementById('primary');
+    const duplicate = document.getElementById('duplicate');
+    let clicks = 0;
+    window.__RF_SCENARIO__ = 'none';
+    window.__RF_CLICKS__ = () => clicks;
+
+    function setScenario(name) {
+      window.__RF_SCENARIO__ = name;
+      status.textContent = 'Scenario: ' + name;
+      primary.disabled = false;
+      primary.style.display = '';
+      duplicate.style.display = 'none';
+      document.getElementById('modal').style.display = 'none';
+      document.getElementById('banner').style.display = 'none';
+      if (name === 'disappear') primary.style.display = 'none';
+      if (name === 'disabled') primary.disabled = true;
+      if (name === 'duplicate') duplicate.style.display = '';
+      if (name === 'modal') document.getElementById('modal').style.display = 'flex';
+      if (name === 'cookie') document.getElementById('banner').style.display = 'block';
+      if (name === 'move') primary.style.marginLeft = '320px';
+      if (name === 'delayed') {
+        primary.disabled = true;
+        setTimeout(() => { primary.disabled = false; status.textContent = 'Scenario: delayed (ready)'; }, 1200);
+      }
+      if (name === 'mutate') {
+        primary.textContent = 'Confirm order';
+        primary.id = 'primary-mutated';
+      }
+    }
+
+    [primary, duplicate].forEach((btn) => {
+      btn.addEventListener('click', () => {
+        clicks += 1;
+        status.textContent = 'Clicked: ' + btn.id;
+      });
+    });
+    document.getElementById('accept-cookies').addEventListener('click', () => {
+      document.getElementById('modal').style.display = 'none';
+    });
+    document.getElementById('dismiss-banner').addEventListener('click', () => {
+      document.getElementById('banner').style.display = 'none';
+    });
+    window.__RF_SET_SCENARIO__ = setScenario;
+  </script>
+</body>
+</html>

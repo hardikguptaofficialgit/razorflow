@@ -34,7 +34,7 @@ def test_search_query_strips_budget_suffix() -> None:
     assert "6k" not in query.lower()
 
 
-def test_policy_blocks_cart_nav_for_add_to_cart_goal() -> None:
+def test_policy_replans_instead_of_synthesizing_cart_navigation() -> None:
     session = RunSession(
         run_id="guard-2",
         task="add best wireless earbud under 6k to cart",
@@ -73,9 +73,9 @@ def test_policy_blocks_cart_nav_for_add_to_cart_goal() -> None:
     )
 
     guarded = validate_planner_chunk(session, chunk, parse_task_intent(session.task))
-    assert guarded.steps
-    assert guarded.steps[0].action == "click_element"
-    assert (guarded.steps[0].match_text or "").lower() == "add to cart"
+    assert not guarded.steps
+    assert guarded.terminal == "continue"
+    assert "empty" in session.planner_nudge.lower()
 
 
 def test_policy_allows_type_on_home() -> None:
@@ -101,5 +101,5 @@ def test_policy_allows_type_on_home() -> None:
         terminal="continue",
     )
 
-    guarded = validate_planner_chunk(session, chunk, parse_task_intent(session.task))
+    guarded = validate_planner_chunk(session, chunk)
     assert guarded.steps[0].action == "type_in_element"

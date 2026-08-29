@@ -8,10 +8,16 @@
     "fake-store"
   ],
   "scripts": {
-    "build:sdk": "npm run build -w @strykerinside/razorflow-protocol && npm run build -w @strykerinside/razorflow-browser && npm run build -w @strykerinside/razorflow-client",
-    "typecheck:sdk": "npm run typecheck -w @strykerinside/razorflow-protocol && npm run typecheck -w @strykerinside/razorflow-browser && npm run typecheck -w @strykerinside/razorflow-client",
+    "build:sdk": "npm run build -w @hardik21232323/razorflow-protocol && npm run build -w @hardik21232323/razorflow-browser && npm run build -w @hardik21232323/razorflow-client",
+    "build:extension": "node extension/scripts/build.mjs",
+    "build:all": "npm run build:sdk && npm run build:extension",
+    "typecheck:sdk": "npm run typecheck -w @hardik21232323/razorflow-protocol && npm run typecheck -w @hardik21232323/razorflow-browser && npm run typecheck -w @hardik21232323/razorflow-client",
     "test:sdk": "node scripts/sdk-smoke.mjs",
-    "publish:sdk": "npm run build:sdk && npm publish -w @strykerinside/razorflow-protocol --access public && npm publish -w @strykerinside/razorflow-browser --access public && npm publish -w @strykerinside/razorflow-client --access public"
+    "check:env": "python scripts/check_env.py",
+    "start:backend": "python agent-backend/main.py",
+    "start:store": "npm run dev -w fake-store",
+    "start:all": "powershell -ExecutionPolicy Bypass -File scripts/start-all.ps1",
+    "publish:sdk": "npm run build:sdk && npm publish -w @hardik21232323/razorflow-protocol --access public && npm publish -w @hardik21232323/razorflow-browser --access public && npm publish -w @hardik21232323/razorflow-client --access public"
   },
   "devDependencies": {
     "picocolors": "^1.1.1",

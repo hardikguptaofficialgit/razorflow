@@ -16,6 +16,7 @@ class TaskMemory:
     completed_steps: list[str] = field(default_factory=list)
     verified_facts: list[str] = field(default_factory=list)
     failed_actions: list[str] = field(default_factory=list)
+    verified_items: list[str] = field(default_factory=list)
     current_target: str = ""
     remaining_work: list[str] = field(default_factory=list)
     remaining_items: list[str] = field(default_factory=list)
@@ -36,6 +37,9 @@ class TaskMemory:
         if self.failed_actions:
             lines.append("- failed_actions (do NOT repeat):")
             lines.extend(f"  • {item}" for item in self.failed_actions[-8:])
+        if self.verified_items:
+            lines.append("- verified_items:")
+            lines.extend(f"  • {item}" for item in self.verified_items[-8:])
         if self.completed_steps:
             lines.append("- completed_steps:")
             lines.extend(f"  • {step}" for step in self.completed_steps[-8:])

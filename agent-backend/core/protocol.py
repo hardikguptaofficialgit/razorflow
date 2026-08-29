@@ -75,7 +75,7 @@ class PageContext(BaseModel):
     title: str
     url: str
     elements: list[PageElementSummary] = Field(default_factory=list, max_length=120)
-    products: list[PageProductSummary] = Field(default_factory=list, max_length=16)
+    products: list[PageProductSummary] = Field(default_factory=list, max_length=32)
     cart_lines: list[PageCartLineSummary] = Field(
         default_factory=list,
         alias="cartLines",
@@ -126,6 +126,25 @@ class NavigateUrlStep(BaseModel):
     url: str = Field(min_length=1)
 
 
+class ScrollPageStep(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    action: Literal["scroll_page"]
+    direction: Literal["up", "down", "top", "bottom"] = "down"
+    amount_px: int = Field(default=600, alias="amountPx", ge=100, le=2000)
+
+
+class WaitStep(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    action: Literal["wait"]
+    duration_ms: int = Field(default=500, alias="durationMs", ge=100, le=5000)
+
+
+class GoBackStep(BaseModel):
+    action: Literal["go_back"]
+
+
 class WaitForUserStep(BaseModel):
     action: Literal["wait_for_user"]
 
@@ -147,6 +166,9 @@ ActionStep = Annotated[
         ClickElementStep,
         HighlightElementStep,
         NavigateUrlStep,
+        ScrollPageStep,
+        WaitStep,
+        GoBackStep,
         WaitForUserStep,
         ReadyForPaymentLinkStep,
     ],

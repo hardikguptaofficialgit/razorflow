@@ -56,9 +56,13 @@ class BrowserPage:
 
     def signature(self) -> str:
         cart_qty = sum(line.quantity for line in self.cart_lines)
+        el_sample = "|".join(
+            f"{el.element_id}:{(el.text or el.aria_label)[:16]}"
+            for el in self.elements[:20]
+        )
         return (
             f"{self.url}|{len(self.products)}|{len(self.cart_lines)}|"
-            f"cartqty:{cart_qty}|{len(self.elements)}"
+            f"cartqty:{cart_qty}|{len(self.elements)}|{el_sample[:200]}"
         )
 
 
@@ -116,7 +120,7 @@ def observe_from_page_context(page: PageContext | None) -> BrowserPage | None:
         )
 
     products: list[ObservedProduct] = []
-    for i, product in enumerate(page.products[:16], start=1):
+    for i, product in enumerate(page.products[:32], start=1):
         products.append(
             ObservedProduct(
                 product_id=f"p{i}",
@@ -206,8 +210,9 @@ def format_observation(page: BrowserPage | None, *, max_elements: int = 60) -> s
         if el.typeable:
             flags.append("type")
         flag_text = f" [{','.join(flags)}]" if flags else ""
+        href_part = f" href={el.href}" if el.href else ""
         lines.append(
-            f"- [{el.element_id}] {el.role}/{el.tag} \"{label[:80]}\"{flag_text}"
+            f"- [{el.element_id}] {el.role}/{el.tag} \"{label[:80]}\"{flag_text}{href_part}"
         )
     if len(page.elements) > max_elements:
         lines.append(f"... ({len(page.elements) - max_elements} more elements)")

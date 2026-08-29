@@ -1,15 +1,15 @@
 # RazorFlow SDK
 
-npm packages published under `@strykerinside`:
+npm packages published under `@hardik21232323`:
 
 | Package | Install |
 |---------|---------|
-| Protocol | `npm install @strykerinside/razorflow-protocol` |
-| Browser | `npm install @strykerinside/razorflow-browser` |
-| Client | `npm install @strykerinside/razorflow-client` |
+| Protocol | `npm install @hardik21232323/razorflow-protocol` |
+| Browser | `npm install @hardik21232323/razorflow-browser` |
+| Client | `npm install @hardik21232323/razorflow-client` |
 
 ```bash
-npm install @strykerinside/razorflow-client @strykerinside/razorflow-browser
+npm install @hardik21232323/razorflow-client @hardik21232323/razorflow-browser
 ```
 
 ## Monorepo

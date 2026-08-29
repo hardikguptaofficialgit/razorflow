@@ -1,9 +1,9 @@
-# @strykerinside/razorflow-client
+# @hardik21232323/razorflow-client
 
 RazorFlow Agent SDK — natural-language browser automation.
 
 ```typescript
-import { RazorFlow } from "@strykerinside/razorflow-client";
+import { RazorFlow } from "@hardik21232323/razorflow-client";
 
 const agent = new RazorFlow({
   endpoint: "ws://127.0.0.1:8765/ws",

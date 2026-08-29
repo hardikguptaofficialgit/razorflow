@@ -6,5 +6,5 @@ export default defineConfig({
   dts: true,
   clean: true,
   sourcemap: true,
-  external: ["@strykerinside/razorflow-protocol"],
+  external: ["@hardik21232323/razorflow-protocol"],
 });

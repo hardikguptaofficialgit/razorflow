@@ -57,28 +57,8 @@ def detect_loop_nudge(session: RunSession) -> str | None:
     if len(navigate_sigs) >= 3 and len(set(navigate_sigs[-3:])) == 1:
         return (
             "LOOP DETECTED: You navigated to the same URL repeatedly. "
-            "The search already ran — pick a product Add to cart button "
-            "or advance to the next item in the list."
+            "Re-observe the page and choose a different observed action."
         )
-
-    click_labels = [
-        (getattr(entry.step, "match_text", "") or "").strip().lower()
-        for entry in recent
-        if getattr(entry.step, "action", "") == "click_element"
-    ]
-    if len(click_labels) >= 2 and click_labels[-1] in {
-        "snacks",
-        "electronics",
-        "fashion",
-        "home",
-        "personal care",
-        "all",
-    }:
-        if click_labels[-3:] == click_labels[-2:] or click_labels.count(click_labels[-1]) >= 2:
-            return (
-                "LOOP DETECTED: Category navigation is not product search. "
-                "Use navigate_url to /search?q=<keyword> instead of category links."
-            )
 
     if session.stale_page_turns >= 2:
         return (

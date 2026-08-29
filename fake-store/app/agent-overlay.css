@@ -1,0 +1,6 @@
+/* Agent visual overlay hooks — extended in globals.css for store shell */
+
+#razorflow-web-agent [data-agent-active="true"] {
+  outline: 2px solid rgba(10, 132, 255, 0.55);
+  outline-offset: 2px;
+}

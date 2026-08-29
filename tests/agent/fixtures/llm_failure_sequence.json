@@ -1,0 +1,7 @@
+{
+  "responses": [
+    "not valid json {{{",
+    "{\"actions\": [], \"proposeFinish\": true}",
+    "{\"actions\": [{\"type\": \"search\", \"target\": {\"elementId\": \"e1\", \"role\": \"search\"}, \"parameters\": {\"query\": \"buds\"}, \"reason\": \"search\", \"expectedOutcome\": \"results\"}]}"
+  ]
+}

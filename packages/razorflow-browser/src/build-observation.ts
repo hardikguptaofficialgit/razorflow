@@ -9,7 +9,7 @@ import type {
   InteractiveElement,
   PageContextWire,
   SemanticGroup,
-} from "@strykerinside/razorflow-protocol";
+} from "@hardik21232323/razorflow-protocol";
 
 const INTERACTIVE_SELECTOR =
   'a,button,input,textarea,select,[role="button"],[role="link"],[role="searchbox"],[contenteditable="true"]';

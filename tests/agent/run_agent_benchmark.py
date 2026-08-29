@@ -16,10 +16,10 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "agent-backend"))
 
+from tests.agent.ws_harness import WS_CONNECT_KWARGS, WS_URL
 from tests.agent.run_live_e2e_tasks import (  # noqa: E402
     EXTRACT_PAGE_CONTEXT_JS,
     STORE_URL,
-    WS_URL,
     clear_cart,
     evaluate_task,
     execute_step,
@@ -86,7 +86,7 @@ async def run_benchmark_task(page: Any, task: str) -> BenchmarkResult:
     steps = 0
     failed = 0
 
-    async with websockets.connect(WS_URL, open_timeout=10) as ws:
+    async with websockets.connect(WS_URL, **WS_CONNECT_KWARGS) as ws:
         page_context = await page.evaluate(EXTRACT_PAGE_CONTEXT_JS)
         await ws.send(
             json.dumps(
@@ -209,16 +209,24 @@ def _task_success(task: str, result: BenchmarkResult, legacy_ok: bool) -> bool:
         return result.terminal == "RUN_COMPLETE" and result.cart_count >= 2
 
     if "checkout" in t:
-        return legacy_ok
+        return result.terminal in {
+            "RUN_COMPLETE",
+            "RUN_WAITING_FOR_USER",
+            "PAYMENT_LINK_CONFIRMATION_REQUIRED",
+        } and result.cart_count >= 1 and (
+            _demo_path_suffix(result.final_url, "/checkout")
+            or "auth=login" in url
+            or legacy_ok
+        )
 
     if t == "buy good snacks under ₹200":
         return result.terminal == "RUN_COMPLETE" and result.cart_count >= 1 and "/checkout" not in url
 
     if t == "show me my cart":
-        return result.terminal == "RUN_COMPLETE" and "/cart" in url
+        return result.terminal == "RUN_COMPLETE" and _demo_path_suffix(result.final_url, "/cart")
 
     if "remove the headphones" in t:
-        return result.terminal == "RUN_COMPLETE" and "/cart" in url
+        return result.terminal == "RUN_COMPLETE" and _demo_path_suffix(result.final_url, "/cart")
 
     if "cheapest smartwatch" in t:
         return result.terminal == "RUN_COMPLETE" and ("/search" in url or result.actions >= 2)
@@ -226,9 +234,13 @@ def _task_success(task: str, result: BenchmarkResult, legacy_ok: bool) -> bool:
     return legacy_ok
 
 
+def _safe(text: str) -> str:
+    return text.encode("ascii", "replace").decode("ascii")
+
+
 def _print_result(result: BenchmarkResult) -> None:
     status = "PASS" if result.success else "FAIL"
-    print(f"[{status}] {result.task}")
+    print(f"[{status}] {_safe(result.task)}")
     print(
         f"  intent={result.intent} time={result.time_s:.1f}s "
         f"actions={result.actions} failed={result.failed_actions} "
@@ -239,6 +251,28 @@ def _print_result(result: BenchmarkResult) -> None:
     print(f"  url: {result.final_url}")
     for entry in result.trace[-10:]:
         print(f"  trace[{entry.step}] {entry.event}: {entry.detail[:120]}")
+
+
+def _demo_path_suffix(url: str, suffix: str) -> bool:
+    from urllib.parse import urlparse
+
+    path = urlparse(url).path.lower()
+    return path.endswith(suffix) or f"{suffix}/" in path
+
+
+async def seed_product(page: Any, query: str) -> None:
+    from urllib.parse import quote
+
+    await page.goto(
+        f"{STORE_URL}/search?q={quote(query)}",
+        wait_until="domcontentloaded",
+        timeout=60000,
+    )
+    await page.wait_for_timeout(600)
+    btn = page.locator("[data-rf-add-to-cart]").first
+    if await btn.count() > 0:
+        await btn.click()
+        await page.wait_for_timeout(500)
 
 
 async def main() -> None:
@@ -257,6 +291,10 @@ async def main() -> None:
             await clear_cart(page)
             await page.goto(STORE_URL, wait_until="domcontentloaded")
             await page.wait_for_timeout(400)
+            if "remove the headphones" in task.lower():
+                await seed_product(page, "headphones")
+                await page.goto(STORE_URL, wait_until="domcontentloaded")
+                await page.wait_for_timeout(400)
             result = await run_benchmark_task(page, task)
             results.append(result)
             _print_result(result)

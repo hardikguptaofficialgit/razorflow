@@ -59,6 +59,7 @@ from utils.config import (
     get_planner_llm_model,
     get_planner_llm_provider,
     get_planner_strategy,
+    get_vercel_ai_gateway_model,
     is_browser_use_enabled,
     is_browser_use_executor_enabled,
     is_agent_runtime_v2_enabled,
@@ -68,6 +69,7 @@ from utils.config import (
     is_openrouter_configured,
     is_planner_llm_ready,
     is_razorpay_configured,
+    is_vercel_ai_gateway_configured,
     log_config_status,
 )
 from voice.intent_classifier import router as voice_router
@@ -110,7 +112,8 @@ async def on_startup() -> None:
 
 @app.get("/health")
 def health() -> dict[str, Any]:
-    executor = is_browser_use_executor_enabled()
+    runtime_v2 = is_agent_runtime_v2_enabled()
+    executor = is_browser_use_executor_enabled() and not runtime_v2
     provider = get_llm_provider()
     if provider == "gemini":
         model_name = get_gemini_model() if is_gemini_configured() else ""
@@ -133,6 +136,9 @@ def health() -> dict[str, Any]:
         if candidate == "groq" and is_groq_configured():
             planner_model = get_planner_llm_model(candidate)
             break
+        if candidate == "vercel_ai_gateway" and is_vercel_ai_gateway_configured():
+            planner_model = get_vercel_ai_gateway_model()
+            break
         if candidate == "gemini" and is_gemini_configured():
             planner_model = get_planner_llm_model(candidate)
             break
@@ -146,7 +152,7 @@ def health() -> dict[str, Any]:
         "browserUseEnabled": is_browser_use_enabled(),
         "browserUseExecutorEnabled": executor,
         "executorMode": "browser_use" if executor else "extension_dom",
-        "agentRuntimeV2": is_agent_runtime_v2_enabled(),
+        "agentRuntimeV2": runtime_v2,
         "plannerMode": planner_provider if is_planner_llm_ready() else "unconfigured",
         "plannerLlmProvider": planner_provider,
         "plannerLlmModel": planner_model,
@@ -165,7 +171,7 @@ async def _send_json(websocket: WebSocket, payload: Any) -> None:
 
 
 async def _terminate_run(session) -> None:
-    if is_browser_use_executor_enabled():
+    if not is_agent_runtime_v2_enabled() and is_browser_use_executor_enabled():
         await browser_use_controller.cancel_run(session.run_id, cleanup=True)
     await cleanup_observer_session(session.run_id)
 
@@ -179,7 +185,11 @@ def _resolve_start_url(message: StartRunMessage | ResumeRunMessage) -> str | Non
 
 
 async def _notify_executor_mode(websocket: WebSocket, run_id: str) -> None:
-    mode = "browser_use" if is_browser_use_executor_enabled() else "extension_dom"
+    mode = (
+        "extension_dom"
+        if is_agent_runtime_v2_enabled()
+        else "browser_use" if is_browser_use_executor_enabled() else "extension_dom"
+    )
     await _send_json(
         websocket,
         ExecutorModeMessage(
@@ -283,7 +293,7 @@ async def _try_complete_run(websocket: WebSocket, session, *, source: str) -> bo
 
 
 async def _dispatch_next_chunk(websocket: WebSocket, session) -> None:
-    if is_agent_runtime_v2_enabled() and not is_browser_use_executor_enabled():
+    if is_agent_runtime_v2_enabled():
         from agent_runtime.bridge.adapter import dispatch_next
 
         await dispatch_next(
@@ -507,7 +517,7 @@ async def _handle_start_run(
 
     await _notify_executor_mode(websocket, message.run_id)
 
-    if is_agent_runtime_v2_enabled() and not is_browser_use_executor_enabled():
+    if is_agent_runtime_v2_enabled():
         from agent_runtime.bridge.adapter import handle_start_run as v2_start_run
 
         await v2_start_run(
@@ -522,7 +532,7 @@ async def _handle_start_run(
         await _send_needs_clarification(websocket, session)
         return
 
-    if is_browser_use_executor_enabled():
+    if not is_agent_runtime_v2_enabled() and is_browser_use_executor_enabled():
         await browser_use_controller.start_run(
             lambda payload: _send_json(websocket, payload),
             session,
@@ -537,7 +547,7 @@ async def _handle_action_result(
     websocket: WebSocket,
     message: ActionResultMessage,
 ) -> None:
-    if is_browser_use_executor_enabled():
+    if not is_agent_runtime_v2_enabled() and is_browser_use_executor_enabled():
         return
 
     if is_agent_runtime_v2_enabled():
@@ -668,7 +678,7 @@ async def _handle_resume_run(
 
     logger.info("RESUME_RUN runId=%s", message.run_id)
 
-    if is_browser_use_executor_enabled():
+    if not is_agent_runtime_v2_enabled() and is_browser_use_executor_enabled():
         run_manager.clear_payment_proposal(session)
         await browser_use_controller.resume_run(
             lambda payload: _send_json(websocket, payload),
@@ -793,7 +803,7 @@ async def _handle_cancel_run(message: CancelRunMessage) -> None:
 
         await handle_cancel(message.run_id)
 
-    if is_browser_use_executor_enabled():
+    if not is_agent_runtime_v2_enabled() and is_browser_use_executor_enabled():
         await browser_use_controller.cancel_run(message.run_id, cleanup=True)
 
     session = run_manager.cancel_run(message.run_id)
@@ -835,7 +845,7 @@ async def websocket_bridge(websocket: WebSocket) -> None:
             "WebSocket client disconnected connectionId=%s — cancelling its active runs",
             connection_id,
         )
-        if is_browser_use_executor_enabled():
+        if not is_agent_runtime_v2_enabled() and is_browser_use_executor_enabled():
             await browser_use_controller.cancel_all_runs()
         for run_id in run_manager.cancel_active_runs(connection_id):
             logger.info("Cancelled run on disconnect runId=%s", run_id)

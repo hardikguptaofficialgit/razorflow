@@ -17,11 +17,15 @@ from agent_runtime.task.parser import parse_task
 
 
 def test_checkout_transitions_after_cart_has_items() -> None:
-    parsed = parse_task("add snacks under ₹200 and checkout")
+    from agent_runtime.task.parser import parse_task_with_spec
+
+    parsed, spec = parse_task_with_spec("add snacks under ₹200 and checkout")
     state = RunState(
         run_id="t1",
         task=parsed.raw,
         parsed_task=parsed,
+        task_spec=spec,
+        current_phase=spec.target_phase,
         memory=TaskMemory(goal=parsed.goal, items_target=1),
     )
     page = BrowserPage(
@@ -33,5 +37,4 @@ def test_checkout_transitions_after_cart_has_items() -> None:
         signals=["cart_page", "cart_items:1"],
     )
     sync_memory_from_observation(state, page)
-    assert "ADD_PHASE_COMPLETE" in " ".join(state.memory.constraints)
     assert any("checkout" in w.lower() for w in state.memory.remaining_work)

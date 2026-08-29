@@ -1,12 +1,12 @@
 {
-  "name": "@strykerinside/razorflow-browser",
+  "name": "@hardik21232323/razorflow-browser",
   "version": "0.1.0",
   "description": "Browser environment abstractions and generic DOM observation for RazorFlow",
   "type": "module",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/strykerinside/razorpay.git",
+    "url": "git+https://github.com/hardik21232323/razorpay.git",
     "directory": "packages/razorflow-browser"
   },
   "publishConfig": {
@@ -30,7 +30,7 @@
     "prepublishOnly": "npm run build"
   },
   "dependencies": {
-    "@strykerinside/razorflow-protocol": "^0.1.0"
+    "@hardik21232323/razorflow-protocol": "^0.1.0"
   },
   "devDependencies": {
     "tsup": "^8.4.0",

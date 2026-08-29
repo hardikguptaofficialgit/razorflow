@@ -50,3 +50,15 @@ def test_checkout_task() -> None:
     parsed = parse_task("add snacks under ₹200 and checkout")
     assert parsed.goal == "checkout"
     assert parsed.requires_checkout is True
+
+
+def test_show_me_my_cart() -> None:
+    parsed = parse_task("show me my cart")
+    assert parsed.goal == "view_cart"
+    assert parsed.actionable is True
+
+
+def test_remove_headphones() -> None:
+    parsed = parse_task("remove the headphones from my cart")
+    assert parsed.goal == "remove"
+    assert parsed.remove_target == "headphones"

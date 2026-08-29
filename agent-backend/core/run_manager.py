@@ -193,7 +193,7 @@ class RunManager:
         if page_context is not None:
             session.latest_page_context = page_context
 
-        if success:
+        if success or verified is True:
             session.consecutive_failures = 0
         else:
             session.consecutive_failures += 1

@@ -25,7 +25,6 @@ from core.planner_llm import (
 )
 from core.planner_repair import repair_planner_payload
 from core.shopping_intent import parse_shopping_intent
-from core.store_planner import is_razorflow_store_url
 from core.task_intent import count_successful_adds, parse_task_intent
 from utils.config import (
     MAX_STEPS_PER_CHUNK,
@@ -66,7 +65,7 @@ Rules:
    - checkout: reach checkout review, then complete or wait_for_user.
    - purchase/buy: full flow through payment when appropriate.
    - remove: open cart if needed, remove the named item, then complete.
-5. Never click category nav (Snacks, Electronics, etc.) — use navigate_url /search?q=keyword.
+5. Use observed links and controls. Never invent site-specific route patterns.
 6. For multi-item add tasks, handle ONE product query at a time.
 7. If the last action failed, choose a different strategy — never repeat the same step.
 8. wait_for_user only for login, CAPTCHA, OTP, or payment confirmation.
@@ -176,22 +175,7 @@ def _build_user_prompt(
     if loop_nudge:
         guidance.append(loop_nudge)
 
-    task_intent = parse_task_intent(session.task)
-    if task_intent.goal == "add_to_cart":
-        adds = count_successful_adds(session)
-        if adds < task_intent.add_target_count:
-            guidance.append(
-                f"Add progress: {adds}/{task_intent.add_target_count} confirmed. "
-                "Click Add to cart again — do NOT return terminal=complete yet."
-            )
-
-    store_hint = ""
     page = session.latest_page_context
-    if page and is_razorflow_store_url(page.url):
-        store_hint = (
-            "Site: RazorFlow Market. Use addToCartIndex for Add to cart. "
-            "Prefer navigate_url to /search?q=keyword from home.\n"
-        )
 
     intent_block = ""
     if _SHOP_TASK_HINT.search(session.task.strip()):
@@ -209,7 +193,6 @@ def _build_user_prompt(
         f"Planning turn: {session.planning_turn + 1}\n"
         f"Phase: {session.phase}\n"
         f"Input source: {planning_source}\n"
-        f"{store_hint}"
         f"{intent_block}"
         f"{screenshot_note}"
         f"{' '.join(guidance)}\n"

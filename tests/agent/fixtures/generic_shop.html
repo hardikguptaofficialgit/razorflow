@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Generic Shop</title>
+  <style>
+    body { font-family: system-ui, sans-serif; margin: 2rem; }
+    .card { border: 1px solid #ccc; padding: 1rem; margin: 0.5rem 0; }
+    .modal { display: none; position: fixed; inset: 0; background: rgba(0,0,0,.4); }
+    .modal.open { display: flex; align-items: center; justify-content: center; }
+    .modal-box { background: #fff; padding: 1.5rem; border-radius: 8px; }
+  </style>
+</head>
+<body>
+  <h1>Generic Shop</h1>
+  <form id="search-form" role="search">
+    <input id="search-input" type="search" placeholder="Search products" aria-label="Search" />
+    <button type="submit">Search</button>
+  </form>
+  <div id="cookie-banner" class="card">
+    <p>We use cookies.</p>
+    <button id="accept-cookies">Accept</button>
+  </div>
+  <div id="results"></div>
+  <div id="modal" class="modal" role="dialog" aria-label="Notice">
+    <div class="modal-box">
+      <p id="modal-text">Unexpected modal</p>
+      <button id="close-modal">Close</button>
+    </div>
+  </div>
+  <script>
+    const catalog = [
+      { id: 'buds-fe', title: 'Galaxy Buds FE', price: 4999 },
+      { id: 'buds-2', title: 'Galaxy Buds 2', price: 8999 },
+      { id: 'watch-1', title: 'Noise Watch', price: 2999 },
+      { id: 'chips', title: "Lay's Chips", price: 20 },
+    ];
+    const results = document.getElementById('results');
+    const banner = document.getElementById('cookie-banner');
+    document.getElementById('accept-cookies').onclick = () => { banner.style.display = 'none'; };
+    document.getElementById('close-modal').onclick = () => {
+      document.getElementById('modal').classList.remove('open');
+    };
+    function render(list) {
+      results.innerHTML = list.map((p) => `
+        <article class="card" data-product-id="${p.id}">
+          <h2>${p.title}</h2>
+          <p>₹${p.price}</p>
+          <button class="add-btn" data-product-id="${p.id}">Add to cart</button>
+        </article>
+      `).join('');
+    }
+    render(catalog);
+    let cart = 0;
+    results.addEventListener('click', (e) => {
+      const btn = e.target.closest('.add-btn');
+      if (!btn) return;
+      cart += 1;
+      btn.textContent = 'Added';
+      document.body.dataset.cartCount = String(cart);
+    });
+    document.getElementById('search-form').onsubmit = (e) => {
+      e.preventDefault();
+      const q = document.getElementById('search-input').value.toLowerCase().trim();
+      const filtered = catalog.filter((p) => p.title.toLowerCase().includes(q));
+      render(filtered.length ? filtered : catalog);
+      document.body.dataset.searchQuery = q;
+    };
+    window.showModal = () => document.getElementById('modal').classList.add('open');
+    window.disableFirstAdd = () => {
+      const btn = document.querySelector('.add-btn');
+      if (btn) { btn.disabled = true; btn.textContent = 'Unavailable'; }
+    };
+  </script>
+</body>
+</html>

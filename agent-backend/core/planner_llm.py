@@ -1,10 +1,11 @@
-"""LLM completion for the DOM agent planner (OpenRouter → Groq → Gemini fallback)."""
+"""LLM completion for the DOM agent planner (OpenRouter → Groq → Vercel AI Gateway → Gemini)."""
 
 from __future__ import annotations
 
 import json
 import logging
 import re
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -16,24 +17,43 @@ from utils.config import (
     get_gemini_api_key,
     get_gemini_model,
     get_groq_api_key,
+    get_groq_api_keys,
     get_groq_model,
+    get_llm_retry_budget,
     get_openrouter_api_keys,
     get_openrouter_model,
     get_planner_llm_fallback_chain,
     get_planner_llm_model,
+    get_vercel_ai_gateway_api_key,
+    get_vercel_ai_gateway_model,
     is_gemini_configured,
     is_groq_configured,
     is_openrouter_configured,
     is_planner_screenshot_enabled,
+    is_vercel_ai_gateway_configured,
+)
+from utils.llm_resilience import (
+    AUTH,
+    BILLING,
+    RATE_LIMIT,
+    SERVER,
+    TRANSPORT,
+    call_with_resilience,
+    classify_error,
+    compute_delay,
 )
 
 logger = logging.getLogger(__name__)
 
 GEMINI_API_BASE = "https://generativelanguage.googleapis.com/v1beta/models"
 OPENROUTER_API_URL = "https://openrouter.ai/api/v1/chat/completions"
-_RETRYABLE_HTTP_CODES = {500, 502, 503, 504}
-_KEY_SWITCH_HTTP_CODES = {401, 402, 403, 429}
+VERCEL_AI_GATEWAY_API_URL = "https://ai-gateway.vercel.sh/v1/chat/completions"
+# Credential/credit problems: rotate to the next API key immediately — waiting cannot help.
+_KEY_SWITCH_HTTP_CODES = {401, 402, 403}
 _MAX_ATTEMPTS = 3
+_HTTP_TIMEOUT_SEC = 60
+_KEY_COOLDOWNS: dict[tuple[str, str], float] = {}
+_KEY_STATE_LOCK = threading.Lock()
 
 
 class PlannerConfigurationError(RuntimeError):
@@ -44,6 +64,47 @@ class PlannerLlmError(RuntimeError):
     """Raised when every planner LLM in the fallback chain fails."""
 
 
+def _key_label(index: int) -> str:
+    """A safe key identifier for logs; API key material must never be logged."""
+    return f"key #{index + 1}"
+
+
+def _failure_cooldown(error: Exception) -> tuple[float, str]:
+    """Return a conservative cooldown for failures that should trigger rotation."""
+    kind = classify_error(error).kind
+    if kind == RATE_LIMIT:
+        return 300.0, "rate_or_quota_limit"
+    if kind in (AUTH, BILLING):
+        return 900.0, f"{kind}_failure"
+    if kind in (TRANSPORT, SERVER):
+        return 30.0, "temporary_provider_failure"
+    return 60.0, "provider_failure"
+
+
+def _available_keys(provider: str, keys: tuple[str, ...]) -> list[tuple[int, str]]:
+    now = time.monotonic()
+    with _KEY_STATE_LOCK:
+        available = [
+            (index, key)
+            for index, key in enumerate(keys)
+            if _KEY_COOLDOWNS.get((provider, key), 0.0) <= now
+        ]
+    return available
+
+
+def _cool_down_key(provider: str, index: int, key: str, error: Exception) -> None:
+    duration, reason = _failure_cooldown(error)
+    with _KEY_STATE_LOCK:
+        _KEY_COOLDOWNS[(provider, key)] = time.monotonic() + duration
+    logger.warning(
+        "%s planner %s failed (%s); cooling down for %.0fs",
+        provider,
+        _key_label(index),
+        reason,
+        duration,
+    )
+
+
 def _http_json_complete(
     *,
     url: str,
@@ -52,59 +113,113 @@ def _http_json_complete(
     provider: str,
     extract_text: Callable[[dict], str],
     max_attempts: int = _MAX_ATTEMPTS,
+    model: str = "",
 ) -> str:
     payload = json.dumps(body).encode()
     last_error: Exception | None = None
+    started = time.perf_counter()
+    retries = 0
+    attempts = 0
+    backoff_s = 0.0
+    budget = get_llm_retry_budget()
+
+    def finalize(ok: bool, detail: str | None = None) -> None:
+        elapsed_ms = (time.perf_counter() - started) * 1000.0
+        logger.info(
+            "LLM_CALL provider=%s model=%s ok=%s attempts=%s retries=%s latency_ms=%.0f "
+            "backoff_ms=%.0f providers_tried=%s error=%s",
+            provider,
+            model or "?",
+            ok,
+            attempts,
+            retries,
+            elapsed_ms,
+            backoff_s * 1000.0,
+            provider,
+            (detail or "-")[:200],
+        )
 
     for attempt in range(1, max_attempts + 1):
+        attempts = attempt
         request = urllib.request.Request(
             url,
             data=payload,
             headers=headers,
         )
         try:
-            with urllib.request.urlopen(request, timeout=60) as response:
+            with urllib.request.urlopen(request, timeout=_HTTP_TIMEOUT_SEC) as response:
                 parsed = json.loads(response.read())
             text = extract_text(parsed)
             if not text.strip():
                 raise ValueError(f"{provider} returned empty planner output.")
             if attempt > 1:
                 logger.info("%s planner succeeded on attempt %s", provider, attempt)
+            finalize(True)
             return text
         except urllib.error.HTTPError as error:
             detail = error.read().decode("utf-8", errors="replace")[:400]
             last_error = ValueError(f"{provider} HTTP {error.code}: {detail}")
-            if error.code in _KEY_SWITCH_HTTP_CODES:
-                raise last_error from error
-            if error.code in _RETRYABLE_HTTP_CODES and attempt < max_attempts:
-                delay = 0.8 * (2 ** (attempt - 1))
-                logger.warning(
-                    "%s planner HTTP %s attempt %s/%s — retry in %.1fs",
-                    provider,
-                    error.code,
+            info = classify_error(error, provider=provider, model=model)
+            wait = (
+                compute_delay(
                     attempt,
-                    max_attempts,
-                    delay,
+                    info,
+                    base_delay=0.8,
+                    max_delay=12.0,
+                    elapsed=time.perf_counter() - started,
+                    budget=budget,
                 )
-                time.sleep(delay)
-                continue
-            raise last_error from error
+                if info.retryable
+                else None
+            )
+            if error.code in _KEY_SWITCH_HTTP_CODES or wait is None:
+                finalize(False, str(last_error))
+                raise last_error from error
+            retries += 1
+            backoff_s += wait
+            logger.warning(
+                "%s planner %s attempt %s/%s — backing off %.1fs",
+                provider,
+                info.describe(),
+                attempt,
+                max_attempts,
+                wait,
+            )
+            time.sleep(wait)
+            continue
         except Exception as error:
             last_error = error
-            if attempt < max_attempts:
-                delay = 0.8 * (2 ** (attempt - 1))
-                logger.warning(
-                    "%s planner error attempt %s/%s — retry in %.1fs: %s",
-                    provider,
+            info = classify_error(error, provider=provider, model=model)
+            # A completion we could not parse is a provider hiccup, not a client mistake.
+            wait = (
+                compute_delay(
                     attempt,
-                    max_attempts,
-                    delay,
-                    error,
+                    info,
+                    base_delay=0.8,
+                    max_delay=12.0,
+                    elapsed=time.perf_counter() - started,
+                    budget=budget,
                 )
-                time.sleep(delay)
-                continue
-            raise
+                if info.retryable or isinstance(error, ValueError)
+                else None
+            )
+            if wait is None or attempt >= max_attempts:
+                finalize(False, str(error))
+                raise
+            retries += 1
+            backoff_s += wait
+            logger.warning(
+                "%s planner error attempt %s/%s — retry in %.1fs: %s",
+                provider,
+                attempt,
+                max_attempts,
+                wait,
+                error,
+            )
+            time.sleep(wait)
+            continue
 
+    finalize(False, str(last_error))
     raise PlannerLlmError(str(last_error or f"{provider} planner failed."))
 
 
@@ -119,7 +234,7 @@ def _vision_enabled(provider: str, screenshot_data_url: str | None) -> bool:
     return bool(
         screenshot_data_url
         and is_planner_screenshot_enabled()
-        and provider in {"openrouter", "gemini"}
+        and provider in {"openrouter", "vercel_ai_gateway", "gemini"}
     )
 
 
@@ -162,6 +277,7 @@ def _gemini_complete(
         headers={"Content-Type": "application/json"},
         provider="Gemini",
         extract_text=extract_text,
+        model=model,
     )
 
 
@@ -209,6 +325,7 @@ def _openrouter_complete_with_key(
         },
         provider="OpenRouter",
         extract_text=_openrouter_extract_text,
+        model=get_openrouter_model(),
         max_attempts=2,
     )
 
@@ -224,11 +341,19 @@ def _openrouter_complete(
             "OPENROUTER_API_KEY is not configured. Add it to .env and restart the backend.",
         )
 
+    available = _available_keys("OpenRouter", keys)
+    if not available:
+        raise PlannerLlmError("All OpenRouter API keys are cooling down.")
+
     last_error: Exception | None = None
-    for index, api_key in enumerate(keys):
+    deadline = time.monotonic() + get_llm_retry_budget()
+    for attempt, (index, api_key) in enumerate(available):
+        if attempt and time.monotonic() >= deadline:
+            logger.warning("Planner retry budget exhausted — failing over to the next provider")
+            break
         try:
-            if index > 0:
-                logger.info("OpenRouter planner trying backup key #%s", index + 1)
+            if attempt > 0:
+                logger.info("OpenRouter planner switching to %s", _key_label(index))
             return _openrouter_complete_with_key(
                 api_key,
                 system_prompt,
@@ -237,7 +362,8 @@ def _openrouter_complete(
             )
         except Exception as error:
             last_error = error
-            if index + 1 < len(keys):
+            _cool_down_key("OpenRouter", index, api_key, error)
+            if attempt + 1 < len(available):
                 logger.warning(
                     "OpenRouter key #%s failed (%s) — switching to next key",
                     index + 1,
@@ -250,26 +376,107 @@ def _openrouter_complete(
     )
 
 
+def _vercel_ai_gateway_complete(
+    system_prompt: str,
+    user_prompt: str,
+    screenshot_data_url: str | None = None,
+) -> str:
+    api_key = get_vercel_ai_gateway_api_key()
+    if not api_key:
+        raise PlannerConfigurationError(
+            "Vercel AI Gateway is not configured. Set AI_GATEWAY_API_KEY or run vercel env pull.",
+        )
+
+    user_content: str | list[dict]
+    if screenshot_data_url and is_planner_screenshot_enabled():
+        user_content = [
+            {"type": "text", "text": user_prompt},
+            {"type": "image_url", "image_url": {"url": screenshot_data_url}},
+        ]
+    else:
+        user_content = user_prompt
+
+    return _http_json_complete(
+        url=VERCEL_AI_GATEWAY_API_URL,
+        body={
+            "model": get_vercel_ai_gateway_model(),
+            "temperature": 0.05,
+            "response_format": {"type": "json_object"},
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_content},
+            ],
+        },
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        },
+        provider="VercelAIGateway",
+        extract_text=_openrouter_extract_text,
+        model=get_vercel_ai_gateway_model(),
+        max_attempts=2,
+    )
+
+
+def _groq_complete_with_key(
+    api_key: str,
+    system_prompt: str,
+    user_prompt: str,
+) -> str:
+    model = get_groq_model()
+
+    def request() -> str:
+        # max_retries=0 keeps the SDK from sleeping out a Retry-After invisibly; the shared
+        # budget decides whether to wait or let the caller rotate keys and fall back.
+        client = Groq(api_key=api_key, timeout=_HTTP_TIMEOUT_SEC, max_retries=0)
+        response = client.chat.completions.create(
+            model=model,
+            temperature=0.05,
+            response_format={"type": "json_object"},
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+        )
+        raw_content = response.choices[0].message.content
+        if not raw_content:
+            raise ValueError("Groq returned empty planner output.")
+        return raw_content
+
+    return call_with_resilience(request, provider="Groq", model=model)[0]
+
+
 def _groq_complete(system_prompt: str, user_prompt: str) -> str:
-    if not get_groq_api_key():
+    keys = get_groq_api_keys()
+    if not keys:
         raise PlannerConfigurationError(
             "GROQ_API_KEY is not configured. Add it to .env and restart the backend.",
         )
 
-    client = Groq(api_key=get_groq_api_key())
-    response = client.chat.completions.create(
-        model=get_groq_model(),
-        temperature=0.05,
-        response_format={"type": "json_object"},
-        messages=[
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt},
-        ],
-    )
-    raw_content = response.choices[0].message.content
-    if not raw_content:
-        raise ValueError("Groq returned empty planner output.")
-    return raw_content
+    available = _available_keys("Groq", keys)
+    if not available:
+        raise PlannerLlmError("All Groq API keys are cooling down.")
+
+    last_error: Exception | None = None
+    deadline = time.monotonic() + get_llm_retry_budget()
+    for attempt, (index, api_key) in enumerate(available):
+        if attempt and time.monotonic() >= deadline:
+            logger.warning("Planner retry budget exhausted — failing over to the next provider")
+            break
+        try:
+            if attempt > 0:
+                logger.info("Groq planner switching to %s", _key_label(index))
+            return _groq_complete_with_key(api_key, system_prompt, user_prompt)
+        except Exception as error:
+            last_error = error
+            _cool_down_key("Groq", index, api_key, error)
+            if attempt + 1 < len(available):
+                logger.warning(
+                    "Groq key #%s failed (%s) — switching to next key",
+                    index + 1,
+                    error,
+                )
+    raise PlannerLlmError(str(last_error or "All Groq API keys failed."))
 
 
 def _complete_with_provider(
@@ -284,6 +491,8 @@ def _complete_with_provider(
         return _groq_complete(system_prompt, user_prompt)
     if provider == "openrouter":
         return _openrouter_complete(system_prompt, user_prompt, screenshot_data_url)
+    if provider == "vercel_ai_gateway":
+        return _vercel_ai_gateway_complete(system_prompt, user_prompt, screenshot_data_url)
     if provider == "gemini":
         return _gemini_complete(system_prompt, user_prompt, screenshot_data_url)
     raise PlannerConfigurationError(f"Unknown planner provider: {provider}")
@@ -294,6 +503,8 @@ def _is_provider_configured(provider: str) -> bool:
         return is_groq_configured()
     if provider == "openrouter":
         return is_openrouter_configured()
+    if provider == "vercel_ai_gateway":
+        return is_vercel_ai_gateway_configured()
     if provider == "gemini":
         return is_gemini_configured()
     return False
@@ -308,7 +519,8 @@ def complete_planner_json(
     configured = [provider for provider in chain if _is_provider_configured(provider)]
     if not configured:
         raise PlannerConfigurationError(
-            "No planner LLM configured. Set OPENROUTER_API_KEY, GROQ_API_KEY, or GEMINI_API_KEY in .env.",
+            "No planner LLM configured. Set OPENROUTER_API_KEY, GROQ_API_KEY, "
+            "AI_GATEWAY_API_KEY, or GEMINI_API_KEY.",
         )
 
     last_error: Exception | None = None

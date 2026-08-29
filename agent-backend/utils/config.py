@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import os
 from pathlib import Path
+import re
 
 from dotenv import load_dotenv
 
@@ -15,14 +16,18 @@ _REPO_ROOT = _BACKEND_ROOT.parent
 
 
 def load_environment() -> None:
-    """Load repo-root .env first, then optional agent-backend/.env overrides."""
+    """Load repo-root .env first, then .env.test overrides, then agent-backend/.env."""
     repo_env = _REPO_ROOT / ".env"
+    repo_env_test = _REPO_ROOT / ".env.test"
     local_env = _BACKEND_ROOT / ".env"
 
     if repo_env.is_file():
         load_dotenv(repo_env)
         logger.info("Loaded environment from %s", repo_env)
-    else:
+    if repo_env_test.is_file():
+        load_dotenv(repo_env_test, override=True)
+        logger.info("Applied test overrides from %s", repo_env_test)
+    elif not repo_env.is_file():
         logger.warning("No .env found at %s", repo_env)
 
     if local_env.is_file():
@@ -40,8 +45,37 @@ def _env_bool(name: str, default: bool = False) -> bool:
     return value.strip().lower() in {"1", "true", "yes", "on"}
 
 
+def get_groq_api_keys() -> tuple[str, ...]:
+    """All Groq keys in priority order, removing duplicates."""
+    return _get_api_keys("GROQ")
+
+
+def _get_api_keys(prefix: str) -> tuple[str, ...]:
+    """Read API_KEY, API_KEY_2..API_KEY_N, and API_KEYS without a fixed limit."""
+    keys: list[str] = []
+    base_name = f"{prefix}_API_KEY"
+    names = [base_name]
+    names.extend(sorted(
+        (name for name in os.environ if re.fullmatch(rf"{re.escape(base_name)}_\d+", name)),
+        key=lambda name: int(name.rsplit("_", 1)[1]),
+    ))
+    for name in names:
+        value = os.getenv(name, "").strip()
+        if value and value not in keys:
+            keys.append(value)
+
+    bulk = os.getenv(f"{prefix}_API_KEYS", "").strip()
+    if bulk:
+        for part in bulk.split(","):
+            part = part.strip()
+            if part and part not in keys:
+                keys.append(part)
+    return tuple(keys)
+
+
 def get_groq_api_key() -> str:
-    return os.getenv("GROQ_API_KEY", "").strip()
+    keys = get_groq_api_keys()
+    return keys[0] if keys else ""
 
 
 DEFAULT_GROQ_MODEL = "openai/gpt-oss-120b"
@@ -55,6 +89,45 @@ def is_groq_configured() -> bool:
     return bool(get_groq_api_key())
 
 
+def _env_int(name: str, default: int) -> int:
+    try:
+        return int(os.getenv(name, "").strip() or default)
+    except ValueError:
+        return default
+
+
+def _env_float(name: str, default: float) -> float:
+    try:
+        return float(os.getenv(name, "").strip() or default)
+    except ValueError:
+        return default
+
+
+# Three providers at 15s each stay inside the browser-use 50s first-step watchdog, while a
+# typical per-minute Retry-After still fits in one bounded wait before failing over.
+DEFAULT_LLM_RETRY_MAX_ATTEMPTS = 3
+DEFAULT_LLM_RETRY_BASE_DELAY_SEC = 1.0
+DEFAULT_LLM_RETRY_MAX_DELAY_SEC = 10.0
+DEFAULT_LLM_RETRY_BUDGET_SEC = 15.0
+
+
+def get_llm_retry_max_attempts() -> int:
+    return _env_int("LLM_RETRY_MAX_ATTEMPTS", DEFAULT_LLM_RETRY_MAX_ATTEMPTS)
+
+
+def get_llm_retry_base_delay() -> float:
+    return _env_float("LLM_RETRY_BASE_DELAY_SEC", DEFAULT_LLM_RETRY_BASE_DELAY_SEC)
+
+
+def get_llm_retry_max_delay() -> float:
+    return _env_float("LLM_RETRY_MAX_DELAY_SEC", DEFAULT_LLM_RETRY_MAX_DELAY_SEC)
+
+
+def get_llm_retry_budget() -> float:
+    """Wall-clock ceiling for same-provider retries before falling over to the next provider."""
+    return _env_float("LLM_RETRY_BUDGET_SEC", DEFAULT_LLM_RETRY_BUDGET_SEC)
+
+
 def get_planner_strategy() -> str:
     """llm = Groq-first for in-app DOM agent; hybrid = heuristics before Groq."""
     raw = (os.getenv("PLANNER_STRATEGY", "llm").strip() or "llm").lower()
@@ -66,7 +139,7 @@ def get_llm_provider() -> str:
 
     Paid ChatBrowserUse / Browser-Use cloud LLM is not supported.
     """
-    raw = (os.getenv("LLM_PROVIDER", "gemini").strip() or "gemini").lower()
+    raw = (os.getenv("LLM_PROVIDER", "openrouter").strip() or "openrouter").lower()
     if raw in {"browser_use", "chatbrowseruse", "bu"}:
         logger.warning(
             "LLM_PROVIDER=%s is the paid Browser-Use cloud LLM — forcing gemini",
@@ -80,24 +153,29 @@ def get_llm_provider() -> str:
 
 DEFAULT_GEMINI_MODEL = "gemini-2.5-flash"
 
-PLANNER_LLM_CHAIN = ("openrouter", "groq", "gemini")
+PLANNER_LLM_CHAIN = ("openrouter", "groq", "vercel_ai_gateway", "gemini")
 
 
 def get_planner_llm_provider() -> str:
-    """Primary planner LLM: openrouter | groq | gemini (defaults to openrouter)."""
+    """Primary planner LLM: openrouter or groq (defaults to openrouter)."""
     raw = (os.getenv("PLANNER_LLM_PROVIDER", "").strip() or "openrouter").lower()
-    if raw == "google":
-        return "gemini"
     if raw in PLANNER_LLM_CHAIN:
         return raw
     return "openrouter"
 
 
 def get_planner_llm_fallback_chain() -> tuple[str, ...]:
-    """Ordered planner providers: primary first, then automatic fallbacks."""
+    """Ordered planner providers, defaulting to OpenRouter then Groq."""
+    configured = os.getenv("PLANNER_LLM_PROVIDERS", "").strip()
+    if configured:
+        chain = tuple(
+            item
+            for item in (part.strip().lower() for part in configured.split(","))
+            if item in PLANNER_LLM_CHAIN
+        )
+        if chain:
+            return tuple(dict.fromkeys(chain))
     primary = get_planner_llm_provider()
-    if primary not in PLANNER_LLM_CHAIN:
-        return PLANNER_LLM_CHAIN
     start = PLANNER_LLM_CHAIN.index(primary)
     return PLANNER_LLM_CHAIN[start:]
 
@@ -110,10 +188,31 @@ def get_planner_llm_model(provider: str) -> str:
     return get_gemini_model()
 
 
+def get_vercel_ai_gateway_api_key() -> str:
+    """AI Gateway API key or Vercel OIDC token (see vercel env pull)."""
+    return (
+        os.getenv("AI_GATEWAY_API_KEY", "").strip()
+        or os.getenv("VERCEL_OIDC_TOKEN", "").strip()
+    )
+
+
+def get_vercel_ai_gateway_model() -> str:
+    return (
+        os.getenv("VERCEL_AI_GATEWAY_MODEL", "").strip()
+        or os.getenv("AI_GATEWAY_MODEL", "").strip()
+        or "google/gemini-2.5-flash-lite"
+    )
+
+
+def is_vercel_ai_gateway_configured() -> bool:
+    return bool(get_vercel_ai_gateway_api_key())
+
+
 def is_planner_llm_ready() -> bool:
     return (
-        is_groq_configured()
-        or is_openrouter_configured()
+        is_openrouter_configured()
+        or is_groq_configured()
+        or is_vercel_ai_gateway_configured()
         or is_gemini_configured()
     )
 
@@ -153,22 +252,7 @@ def is_browser_use_cloud_configured() -> bool:
 
 def get_openrouter_api_keys() -> tuple[str, ...]:
     """All OpenRouter keys in priority order (primary → backups)."""
-    keys: list[str] = []
-    for name in (
-        "OPENROUTER_API_KEY",
-        "OPENROUTER_API_KEY_2",
-        "OPENROUTER_API_KEY_3",
-    ):
-        value = os.getenv(name, "").strip()
-        if value and value not in keys:
-            keys.append(value)
-
-    bulk = os.getenv("OPENROUTER_API_KEYS", "").strip()
-    if bulk:
-        for part in bulk.split(","):
-            part = part.strip()
-            if part and part not in keys:
-                keys.append(part)
+    keys = list(_get_api_keys("OPENROUTER"))
 
     if not keys:
         fallback = os.getenv("LLM_API_KEY", "").strip()

@@ -12,7 +12,10 @@ from pathlib import Path
 from typing import Any
 
 ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "agent-backend"))
+
+from tests.agent.ws_harness import WS_CONNECT_KWARGS
 
 WS_URL = "ws://127.0.0.1:8765/ws"
 MAX_STEPS = 24
@@ -131,7 +134,7 @@ async def run_task(page: Any, spec: WebTask) -> TaskResult:
     await page.goto(spec.start_url, wait_until="domcontentloaded", timeout=30000)
     await page.wait_for_timeout(800)
 
-    async with websockets.connect(WS_URL, open_timeout=10) as ws:
+    async with websockets.connect(WS_URL, **WS_CONNECT_KWARGS) as ws:
         page_context = _strip_nulls(await page.evaluate(EXTRACT_FN))
         await ws.send(
             json.dumps(

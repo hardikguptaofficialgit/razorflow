@@ -38,3 +38,19 @@ def test_search_translation() -> None:
     assert len(steps) == 1
     assert steps[0].action == "type_in_element"
     assert steps[0].text == "wireless earbuds"
+    assert steps[0].role == "search"
+
+
+def test_type_translation_targets_an_ordinary_input() -> None:
+    action = AgentAction(
+        type="type",
+        target=ElementTarget(elementId="e7", role="input", matchText="Email"),
+        parameters={"text": "shopper@example.com"},
+        reason="Fill the email field",
+        expectedOutcome="Email field contains the address",
+    )
+    steps = translate_action(action)
+    assert len(steps) == 1
+    assert steps[0].action == "type_in_element"
+    assert steps[0].role == "input"
+    assert steps[0].text == "shopper@example.com"

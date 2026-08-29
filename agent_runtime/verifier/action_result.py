@@ -3,8 +3,34 @@
 from __future__ import annotations
 
 from agent_runtime.executor.actions import AgentAction
+from agent_runtime.policy.action_gate import _is_checkout_action
+from agent_runtime.verifier.checkout_flow import is_checkout_flow_page
+from agent_runtime.verifier.page_semantics import is_cart_page, is_search_results_page
+from agent_runtime.policy.search_state import entity_in_search, search_entity
 from agent_runtime.observation.browser_state import BrowserPage
 from agent_runtime.state.run_state import RunState
+
+
+def _matches_requested_item(title: str, requested: str) -> bool:
+    """Use observed product names, not an LLM-provided button label, for cart credit."""
+    title_tokens = set(title.lower().split())
+    requested_tokens = set(requested.lower().split())
+    return bool(title_tokens and requested_tokens and title_tokens & requested_tokens)
+
+
+def _product_for_target(
+    target_id: str | None,
+    *pages: BrowserPage | None,
+) -> str | None:
+    if not target_id:
+        return None
+    for page in pages:
+        if page is None:
+            continue
+        for product in page.products:
+            if product.add_element_id == target_id:
+                return product.title
+    return None
 
 
 def verify_action_result(
@@ -16,11 +42,19 @@ def verify_action_result(
     before: BrowserPage | None,
     after: BrowserPage | None,
 ) -> bool:
+    if after is None:
+        return False
+
+    if not success or verified is False:
+        if _default_verify(action, before, after):
+            return True
     if not success:
         return False
-    if verified is False:
-        return False
     if verified is True:
+        if action.type == "scroll" and not _default_verify(action, before, after):
+            return False
+        if _is_checkout_action(action) and not is_checkout_flow_page(after):
+            return False
         return True
 
     if after is None:
@@ -61,14 +95,69 @@ def _default_verify(
     if action.type == "navigate":
         url = str(action.parameters.get("url", ""))
         return bool(url) and url in after.url
-    if action.type in {"search", "type"}:
-        return bool(after.search_query or after.products)
+    is_search_action = action.type == "search" or (
+        action.type == "type"
+        and action.target is not None
+        and (
+            action.target.role == "search"
+            or "search" in (
+                f"{action.reason} "
+                f"{action.target.description} "
+                f"{action.target.match_text}"
+            ).lower()
+        )
+    )
+    if is_search_action:
+        query = str(action.parameters.get("text", "") or action.parameters.get("query", "")).lower()
+        if query and query in after.url.lower():
+            return True
+        return bool(
+            after.search_query or after.products or is_search_results_page(after)
+        )
+    if action.type == "type":
+        text = str(action.parameters.get("text", "") or action.parameters.get("query", "")).strip()
+        if not text:
+            return False
+        target = action.target
+        for element in after.elements:
+            if target and target.element_id and element.element_id != target.element_id:
+                continue
+            if target and target.role and element.role != target.role:
+                continue
+            labels = " ".join(
+                (element.text, element.placeholder, element.aria_label)
+            ).lower()
+            if target and target.match_text and target.match_text.lower() not in labels:
+                continue
+            if element.value.strip() == text:
+                return True
+        return False
+    if action.type == "scroll":
+        if before is None:
+            return False
+        if before.url != after.url:
+            return True
+        before_products = {p.title for p in before.products}
+        after_products = {p.title for p in after.products}
+        if after_products - before_products:
+            return True
+        return before.signature() != after.signature() and bool(after.products)
+    if action.type == "wait":
+        return True
+    if action.type == "go_back":
+        return before is not None and before.url != after.url
     if action.type == "click":
         label = ""
         if action.target:
             label = (action.target.description or action.target.match_text or "").lower()
-        if "add to cart" in label or "add" in label:
+        if "remove" in label:
+            return _cart_items(after) < _cart_items(before)
+        if "add" in label and "cart" in label:
             return _cart_items(after) > _cart_items(before)
+        if _cart_items(after) > _cart_items(before):
+            return True
+        if _is_checkout_action(action):
+            return is_checkout_flow_page(after)
         if before and before.signature() != after.signature():
             return True
         return False
@@ -83,18 +172,39 @@ def apply_verified_progress(
     page: BrowserPage | None,
     *,
     ok: bool,
+    before: BrowserPage | None = None,
 ) -> None:
     if not ok:
         return
+    if action.type == "scroll" and "verified_search" not in state.milestones:
+        spec = state.task_spec
+        intent = spec.intent if spec else state.parsed_task.goal
+        if intent in {"search", "compare"} and page and not is_search_results_page(page):
+            return
     state.verified_progress_count += 1
     if page is None:
         return
 
-    if action.type in {"search", "type"}:
-        state.milestones.add("verified_search")
+    if action.type == "search" or (
+        action.type == "type"
+        and action.target is not None
+        and (
+            action.target.role == "search"
+            or "search" in (
+                f"{action.reason} "
+                f"{action.target.description} "
+                f"{action.target.match_text}"
+            ).lower()
+        )
+    ):
+        entity = search_entity(state)
+        if entity and page and entity_in_search(page, entity):
+            state.milestones.add("verified_search")
+        elif page and is_search_results_page(page):
+            state.milestones.add("verified_search")
         if page.search_query:
             state.memory.note_fact(f"Searched: {page.search_query}")
-        elif "/search" in page.path:
+        elif page and is_search_results_page(page):
             state.memory.note_fact("Navigated to search results")
         state.memory.note_completed("search")
 
@@ -103,10 +213,52 @@ def apply_verified_progress(
         if action.target:
             label = (action.target.description or action.target.match_text or "").lower()
         if "add" in label and "cart" in label:
+            added_title = _product_for_target(
+                action.target.element_id if action.target else None, before, page
+            )
+            requested_items = state.memory.remaining_items or list(
+                state.parsed_task.product_hints
+            )
+            if requested_items and (
+                not added_title
+                or not any(
+                    _matches_requested_item(added_title, item)
+                    for item in requested_items
+                )
+            ):
+                if added_title:
+                    state.memory.note_fact(
+                        f"Ignored unrelated cart addition: {added_title}"
+                    )
+                return
             state.milestones.add("verified_add_to_cart")
             state.memory.items_added += 1
             state.memory.note_completed("add_to_cart")
             state.memory.note_fact(f"Cart items: {_cart_items(page)}")
+            if action.target:
+                found_item = False
+                for observed_page in (page, before):
+                    if observed_page is None:
+                        continue
+                    for product in observed_page.products:
+                        target_matches = (
+                            product.add_element_id == action.target.element_id
+                            or (
+                                product.title
+                                and product.title.lower() in label
+                            )
+                        )
+                        if (
+                            target_matches
+                            and product.title not in state.memory.verified_items
+                        ):
+                            state.memory.verified_items.append(product.title)
+                            found_item = True
+                            break
+                    if found_item:
+                        break
+            if added_title and added_title not in state.memory.verified_items:
+                state.memory.verified_items.append(added_title)
             if state.memory.remaining_items:
                 state.memory.remaining_items.pop(0)
             elif state.parsed_task.product_hints and state.memory.items_added <= len(
@@ -114,8 +266,11 @@ def apply_verified_progress(
             ):
                 done = state.parsed_task.product_hints[state.memory.items_added - 1]
                 state.memory.note_fact(f"Added: {done}")
+        if "remove" in label:
+            state.milestones.add("verified_remove")
+            state.memory.note_completed("remove_from_cart")
 
-    if "/cart" in page.path:
+    if page and is_cart_page(page):
         state.milestones.add("reached_cart")
-    if "/checkout" in page.path or "login_required" in page.signals:
+    if page and is_checkout_flow_page(page):
         state.milestones.add("reached_checkout")

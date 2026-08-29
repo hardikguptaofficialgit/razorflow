@@ -7,9 +7,14 @@ import re
 from core.protocol import PageContext
 
 from agent_runtime.observation.cart_state import header_cart_item_count
+from agent_runtime.verifier.checkout_flow import next_param_points_to_checkout
 
 _CHECKOUT_RE = re.compile(
     r"\b(?:checkout|proceed\s+to\s+pay|place\s+order|payment)\b",
+    re.I,
+)
+_CHECKOUT_AUTH_RE = re.compile(
+    r"\b(?:sign\s*in|log\s*in)\s+to\s+(?:continue|checkout|check)\b",
     re.I,
 )
 _CART_RE = re.compile(r"\b(?:your\s+cart|shopping\s+cart|cart\s+total)\b", re.I)
@@ -32,12 +37,36 @@ def infer_page_signals(page: PageContext) -> list[str]:
 
     if "q=" in url or "/search" in url or _SEARCH_RE.search(combined):
         signals.append("search_results_page")
-    if "/cart" in url or (_CART_RE.search(blob) and "/cart" in url):
+    elif page.products and _SEARCH_RE.search(combined):
+        signals.append("search_results_page")
+    if page.cart_lines or "/cart" in url or _CART_RE.search(combined):
         signals.append("cart_page")
     if "/checkout" in url or (_CHECKOUT_RE.search(blob) and "/checkout" in url):
         signals.append("checkout_page")
-    # Auth gate: URL param or checkout-blocked login — not generic header "Sign in"
-    if "auth=login" in url:
+    # Auth gate on checkout flow — not generic header sign-in
+    if _CHECKOUT_AUTH_RE.search(combined):
+        signals.append("login_required")
+        signals.append("checkout_auth_gate")
+    elif "auth=login" in url and next_param_points_to_checkout(page.url or ""):
+        signals.append("login_required")
+        signals.append("checkout_auth_gate")
+    elif any(
+        el.tag == "data-rf-checkout-auth-gate"
+        or "checkout-login-gate" in (el.aria_label or "").lower()
+        for el in page.elements[:40]
+    ):
+        signals.append("login_required")
+        signals.append("checkout_auth_gate")
+    elif re.search(r"close dialog", blob, re.I) and re.search(
+        r"sign\s*in", blob, re.I
+    ) and re.search(r"create an accoun", blob, re.I) and "/checkout" not in url:
+        signals.append("login_required")
+        signals.append("checkout_auth_gate")
+    elif "/checkout" in url and re.search(
+        r"\b(?:sign\s*in|log\s*in)\b",
+        blob,
+        re.I,
+    ) and re.search(r"\b(?:modal|dialog|password|email)\b", blob, re.I):
         signals.append("login_required")
     elif "/checkout" in url and re.search(
         r"\b(?:sign\s*in\s+to\s+checkout|log\s*in\s+to\s+continue|please\s+log\s*in)\b",

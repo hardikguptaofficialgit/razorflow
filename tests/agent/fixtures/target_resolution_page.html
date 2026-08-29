@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Target Resolution — 20 identical buttons</title>
+  <style>
+    body { font-family: system-ui, sans-serif; margin: 1.5rem; }
+    .grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 0.75rem; }
+    .card { border: 1px solid #ddd; padding: 0.75rem; border-radius: 8px; }
+    .card h2 { margin: 0 0 0.25rem; font-size: 1rem; }
+    button.add { width: 100%; margin-top: 0.5rem; }
+    #status { margin-top: 1rem; font-weight: 600; }
+  </style>
+</head>
+<body>
+  <h1>Identical Add Buttons</h1>
+  <p>Each product has the same button label. The agent must click the correct product card.</p>
+  <div id="grid" class="grid"></div>
+  <p id="status" data-rf-cart-count="0">Cart: 0</p>
+  <div id="cart-lines"></div>
+  <script>
+    const products = [
+      { id: 'buds-fe', title: 'Galaxy Buds FE', price: 4999 },
+      { id: 'buds-2', title: 'Galaxy Buds 2', price: 8999 },
+      { id: 'buds-pro', title: 'Galaxy Buds Pro', price: 12999 },
+      { id: 'watch-noise', title: 'Noise ColorFit', price: 2999 },
+      { id: 'watch-boat', title: 'boAt Wave', price: 1999 },
+      { id: 'chips-lays', title: "Lay's Classic", price: 20 },
+      { id: 'chips-kurkure', title: 'Kurkure Masala', price: 20 },
+      { id: 'butter-amul', title: 'Amul Butter 100g', price: 55 },
+      { id: 'cooker-pigeon', title: 'Pigeon Cooker 3L', price: 1899 },
+      { id: 'cooker-prestige', title: 'Prestige Cooker 2L', price: 1599 },
+      { id: 'headphones-sony', title: 'Sony WH-CH520', price: 3990 },
+      { id: 'headphones-jbl', title: 'JBL Tune 510', price: 2999 },
+      { id: 'speaker-jbl', title: 'JBL Go 3', price: 2499 },
+      { id: 'keyboard-logi', title: 'Logitech K120', price: 995 },
+      { id: 'mouse-hp', title: 'HP USB Mouse', price: 399 },
+      { id: 'ssd-samsung', title: 'Samsung 500GB SSD', price: 4599 },
+      { id: 'ram-corsair', title: 'Corsair 8GB RAM', price: 2499 },
+      { id: 'monitor-lg', title: 'LG 24 inch Monitor', price: 8999 },
+      { id: 'webcam-logi', title: 'Logitech C270', price: 1999 },
+      { id: 'router-tp', title: 'TP-Link Router', price: 1299 },
+    ];
+    const grid = document.getElementById('grid');
+    let cart = [];
+    function render() {
+      grid.innerHTML = products.map((p) => `
+        <article class="card" data-product-id="${p.id}" data-rf-product-card data-rf-product-id="${p.id}">
+          <h2>${p.title}</h2>
+          <p>₹${p.price}</p>
+          <button class="add" data-rf-add-to-cart data-product-id="${p.id}">Add to cart</button>
+        </article>
+      `).join('');
+    }
+    render();
+    grid.addEventListener('click', (e) => {
+      const btn = e.target.closest('[data-rf-add-to-cart]');
+      if (!btn) return;
+      const id = btn.getAttribute('data-product-id');
+      const product = products.find((p) => p.id === id);
+      if (!product) return;
+      cart.push(product.id);
+      document.getElementById('status').textContent = `Cart: ${cart.length} (last: ${product.title})`;
+      document.getElementById('status').dataset.rfCartCount = String(cart.length);
+      document.getElementById('status').dataset.lastProductId = product.id;
+      document.getElementById('cart-lines').innerHTML = cart.map((cartId) => {
+        const cartProduct = products.find((item) => item.id === cartId);
+        return `<div data-rf-cart-line><h3 data-rf-product-title>${cartProduct.title}</h3><span data-rf-line-qty>1</span></div>`;
+      }).join('');
+      btn.textContent = 'Added';
+    });
+    window.__RF_LAST_CART__ = () => cart.slice();
+  </script>
+</body>
+</html>

@@ -1,12 +1,12 @@
 {
-  "name": "@strykerinside/razorflow-client",
+  "name": "@hardik21232323/razorflow-client",
   "version": "0.1.0",
   "description": "RazorFlow Agent SDK — run natural-language browser tasks with events and traces",
   "type": "module",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/strykerinside/razorpay.git",
+    "url": "git+https://github.com/hardik21232323/razorpay.git",
     "directory": "packages/razorflow-client"
   },
   "publishConfig": {
@@ -30,8 +30,8 @@
     "prepublishOnly": "npm run build"
   },
   "dependencies": {
-    "@strykerinside/razorflow-browser": "^0.1.0",
-    "@strykerinside/razorflow-protocol": "^0.1.0"
+    "@hardik21232323/razorflow-browser": "^0.1.0",
+    "@hardik21232323/razorflow-protocol": "^0.1.0"
   },
   "devDependencies": {
     "tsup": "^8.4.0",

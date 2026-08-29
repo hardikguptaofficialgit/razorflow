@@ -8,7 +8,7 @@ Set-Location $root
 if (-not $env:NPM_TOKEN) {
     Write-Host "Set NPM_TOKEN first:" -ForegroundColor Yellow
     Write-Host '  $env:NPM_TOKEN = "npm_your_granular_access_token"' -ForegroundColor Cyan
-    Write-Host "Create one at: https://www.npmjs.com/settings/strykerinside/tokens" -ForegroundColor Gray
+    Write-Host "Create one at: https://www.npmjs.com/settings/hardik21232323/tokens" -ForegroundColor Gray
     exit 1
 }
 
@@ -33,9 +33,9 @@ npm run test:sdk
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 $packages = @(
-    "@strykerinside/razorflow-protocol",
-    "@strykerinside/razorflow-browser",
-    "@strykerinside/razorflow-client"
+    "@hardik21232323/razorflow-protocol",
+    "@hardik21232323/razorflow-browser",
+    "@hardik21232323/razorflow-client"
 )
 
 foreach ($pkg in $packages) {

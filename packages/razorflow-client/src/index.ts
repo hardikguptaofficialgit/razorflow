@@ -16,9 +16,9 @@ import type {
   RunTrace,
   ServerToClientMessage,
   TraceStep,
-} from "@strykerinside/razorflow-protocol";
-import { sanitizePageContextWire } from "@strykerinside/razorflow-protocol";
-import type { BrowserEnvironment } from "@strykerinside/razorflow-browser";
+} from "@hardik21232323/razorflow-protocol";
+import { sanitizePageContextWire } from "@hardik21232323/razorflow-protocol";
+import type { BrowserEnvironment } from "@hardik21232323/razorflow-browser";
 
 // ---------------------------------------------------------------------------
 // Transport
@@ -618,7 +618,7 @@ export type {
   RunTrace,
   ServerToClientMessage,
   TraceStep,
-} from "@strykerinside/razorflow-protocol";
-export { sanitizePageContextWire } from "@strykerinside/razorflow-protocol";
-export type { BrowserEnvironment, StepResult } from "@strykerinside/razorflow-browser";
-export { buildBrowserObservation, observationToWire } from "@strykerinside/razorflow-browser";
+} from "@hardik21232323/razorflow-protocol";
+export { sanitizePageContextWire } from "@hardik21232323/razorflow-protocol";
+export type { BrowserEnvironment, StepResult } from "@hardik21232323/razorflow-browser";
+export { buildBrowserObservation, observationToWire } from "@hardik21232323/razorflow-browser";

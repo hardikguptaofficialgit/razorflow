@@ -1,12 +1,12 @@
 {
-  "name": "@strykerinside/razorflow-protocol",
+  "name": "@hardik21232323/razorflow-protocol",
   "version": "0.1.0",
   "description": "Canonical RazorFlow agent protocol types and wire schemas",
   "type": "module",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/strykerinside/razorpay.git",
+    "url": "git+https://github.com/hardik21232323/razorpay.git",
     "directory": "packages/razorflow-protocol"
   },
   "publishConfig": {

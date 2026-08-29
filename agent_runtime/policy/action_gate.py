@@ -2,12 +2,26 @@
 
 from __future__ import annotations
 
-from agent_runtime.executor.actions import AgentAction
-from agent_runtime.observation.browser_state import BrowserPage
-from agent_runtime.task.spec import TaskSpec
+from agent_runtime.observation.checkout_controls import is_checkout_control_element
+from agent_runtime.observation.browser_state import ObservedElement
+from agent_runtime.task.spec import GoalPhase, TaskSpec, forbidden_for_phase
 
-_CHECKOUT_MARKERS = ("checkout", "proceed to checkout", "pay now", "payment", "place order")
+_CHECKOUT_MARKERS = (
+    "checkout",
+    "proceed to checkout",
+    "proceed to check",
+    "pay now",
+    "payment",
+    "place order",
+)
 _CART_NAV_MARKERS = ("view cart", "open cart", "go to cart", "my cart", "shopping cart")
+_PRODUCT_NAV_MARKERS = (
+    "product details",
+    "view product",
+    "open product",
+    "see details",
+    "learn more",
+)
 
 
 def _action_blob(action: AgentAction) -> str:
@@ -25,7 +39,22 @@ def _is_checkout_action(action: AgentAction) -> bool:
     blob = _action_blob(action)
     if action.type == "navigate" and "/checkout" in blob:
         return True
-    return any(marker in blob for marker in _CHECKOUT_MARKERS)
+    if any(marker in blob for marker in _CHECKOUT_MARKERS):
+        return True
+    if action.target:
+        el = ObservedElement(
+            element_id=action.target.element_id or "",
+            index=0,
+            role=action.target.role or "",
+            tag="",
+            text=action.target.description or action.target.match_text or "",
+            placeholder="",
+            aria_label=action.target.description or "",
+            href=str(action.parameters.get("url", "")),
+        )
+        if is_checkout_control_element(el):
+            return True
+    return False
 
 
 def _is_payment_action(action: AgentAction) -> bool:
@@ -34,6 +63,8 @@ def _is_payment_action(action: AgentAction) -> bool:
 
 
 def _is_cart_nav_action(action: AgentAction) -> bool:
+    if _is_checkout_action(action):
+        return False
     blob = _action_blob(action)
     if action.type == "navigate" and "/cart" in blob:
         return True
@@ -54,32 +85,102 @@ def _is_add_to_cart_action(action: AgentAction) -> bool:
 
 
 def _is_search_action(action: AgentAction) -> bool:
-    return action.type in {"search", "type"}
+    return action.type == "search" or (
+        action.type == "type"
+        and action.target is not None
+        and (
+            action.target.role == "search"
+            or "search" in _action_blob(action)
+        )
+    )
+
+
+def _is_product_details_action(action: AgentAction) -> bool:
+    if _is_checkout_action(action):
+        return False
+    blob = _action_blob(action)
+    if action.type == "navigate" and "/product" in blob:
+        return True
+    if action.type != "click":
+        return False
+    if "add" in blob and "cart" in blob:
+        return False
+    if any(marker in blob for marker in _PRODUCT_NAV_MARKERS):
+        return True
+    # Product title/link click on search results (link role, not add-to-cart).
+    if action.target and action.target.role == "link":
+        if "add" not in blob and "cart" not in blob:
+            return True
+    return False
+
+
+def classify_action(action: AgentAction) -> set[str]:
+    """Return semantic action categories for auditing."""
+    categories: set[str] = set()
+    if _is_search_action(action):
+        categories.add("search")
+    if _is_product_details_action(action):
+        categories.add("product_details")
+    if _is_add_to_cart_action(action):
+        categories.add("add_to_cart")
+    if _is_cart_nav_action(action):
+        categories.add("cart_nav")
+    if _is_checkout_action(action):
+        categories.add("checkout")
+    if _is_payment_action(action):
+        categories.add("payment")
+    return categories
+
+
+def _is_login_nav_action(action: AgentAction) -> bool:
+    blob = _action_blob(action)
+    return any(token in blob for token in ("sign in", "log in", "login", "sign up"))
+
+
+def active_forbidden(spec: TaskSpec, current_phase: GoalPhase) -> frozenset[str]:
+    return forbidden_for_phase(current_phase)
 
 
 def filter_forbidden_actions(
     spec: TaskSpec,
     actions: list[AgentAction],
+    *,
+    current_phase: GoalPhase | None = None,
+    state: RunState | None = None,
 ) -> tuple[list[AgentAction], list[str]]:
     """Return allowed actions and human-readable block reasons."""
-    forbidden = spec.forbidden_actions
-    if not forbidden:
-        return actions, []
+    phase: GoalPhase = current_phase or spec.target_phase
+    forbidden = active_forbidden(spec, phase)
+    if not spec.allows_add_to_cart:
+        forbidden = forbidden | frozenset({"add_to_cart", "checkout", "payment"})
+    if state is not None:
+        if state.memory.items_added >= state.parsed_task.item_count and state.parsed_task.item_count > 0:
+            forbidden = forbidden | frozenset({"add_to_cart"})
 
     kept: list[AgentAction] = []
     blocked: list[str] = []
     for action in actions:
         reason: str | None = None
         if "checkout" in forbidden and _is_checkout_action(action):
-            reason = "checkout is not part of the user goal"
+            reason = "checkout is not allowed in the current goal phase"
         elif "payment" in forbidden and _is_payment_action(action):
-            reason = "payment is not part of the user goal"
+            reason = "payment is not allowed in the current goal phase"
         elif "add_to_cart" in forbidden and _is_add_to_cart_action(action):
-            reason = "add_to_cart is not part of the user goal"
+            reason = "add_to_cart is not allowed in the current goal phase"
         elif "cart_nav" in forbidden and _is_cart_nav_action(action):
-            reason = "cart navigation is not part of the user goal"
+            reason = "cart navigation is not allowed in the current goal phase"
         elif "search" in forbidden and _is_search_action(action):
-            reason = "search is not part of the user goal"
+            reason = "search is not allowed in the current goal phase"
+        elif "product_details" in forbidden and _is_product_details_action(action):
+            reason = "opening product details is not allowed in the current goal phase"
+        elif phase in {"checkout", "checkout_reached"} and _is_login_nav_action(action) and not _is_checkout_action(action):
+            reason = (
+                "header sign-in is not checkout — use a checkout navigation control from observation"
+            )
+        if reason and phase in {"checkout", "checkout_reached"}:
+            reason = (
+                f"{reason} — CURRENT_PHASE=checkout; cart is ready; advance to checkout only"
+            )
         if reason:
             blocked.append(f"{action.type}: {reason}")
             continue

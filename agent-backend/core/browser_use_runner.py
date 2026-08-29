@@ -7,14 +7,14 @@ import logging
 from dataclasses import dataclass
 from typing import Any, Awaitable, Callable
 
-from urllib.parse import quote, urlparse
+from urllib.parse import urlparse
 
 from browser_use import Agent
 from browser_use.agent.views import AgentOutput
 from browser_use.browser.session import BrowserSession
 from browser_use.browser.views import BrowserStateSummary
 
-from core.action_override import force_click_add_to_cart, summarize_actions
+from core.action_override import summarize_actions
 from core.agent_decision_log import log_agent_decision
 from core.browser_use_prompt import RAZORFLOW_EXTEND_SYSTEM_MESSAGE
 from core.browser_use_tools import bind_tools_for_run, clear_tool_state, get_tool_state
@@ -269,8 +269,7 @@ class BrowserUseRunController:
                             tool_state.cart_verified_count = after
                             tool_state.pending_product_title = None
                             verify_msg = (
-                                f"Verified '{title}' in cart (count={after}). "
-                                "Continue to cart and checkout."
+                                f"Verified '{title}' in cart (count={after})."
                             )
                             tool_state.last_reasoning = verify_msg
                             log_agent_decision(
@@ -300,7 +299,7 @@ class BrowserUseRunController:
                                 time.perf_counter() - callback_started
                             ) * 1000.0
                             metrics.log()
-                            # Do not pause or complete — agent should proceed to checkout.
+                            # Let the agent decide the next action from the user goal.
 
                 # --- Observe (compact page extract + deterministic compare) ---
                 with timed_section(metrics, "observe_ms"):
@@ -314,23 +313,10 @@ class BrowserUseRunController:
                     metrics.page_changed = changed
                     metrics.product_count = len(page.products)
 
-                # --- Action selection: force click for BYO LLMs when catalog winner is clear ---
+                # --- Action selection: observe the LLM's actions without mutation ---
                 with timed_section(metrics, "action_select_ms"):
                     forced_index = None
-                    if (
-                        winner is not None
-                        and winner.add_to_cart_element_index is not None
-                        and not tool_state.completion_summary
-                    ):
-                        forced_index = force_click_add_to_cart(agent_output, winner)
-                        metrics.forced_click_index = forced_index
-                        if forced_index is not None:
-                            before = await read_cart_count(handle.browser_session)
-                            tool_state.pending_cart_verify = True
-                            tool_state.cart_count_before_click = before
-                            tool_state.pending_product_title = winner.title
-                            tool_state.selected_product_title = winner.title
-                            tool_state.last_reasoning = compare_reason
+                    metrics.forced_click_index = forced_index
 
                     action_summary = summarize_actions(agent_output)
                     action_key = action_summary.lower().strip()
@@ -356,7 +342,7 @@ class BrowserUseRunController:
                         tool_state.pause_requested = True
                         tool_state.handoff_message = (
                             f"Agent stuck repeating '{action_summary}'. "
-                            "Please click Add to cart for the chosen product, then resume."
+                            "Please adjust the page or task, then resume."
                         )
 
                 log_agent_decision(
@@ -396,20 +382,13 @@ class BrowserUseRunController:
 
                 # --- Overlay sync (UI only; must not gate the click) ---
                 with timed_section(metrics, "sync_ms"):
-                    if winner and winner.add_to_cart_element_index is not None:
-                        action_override = (
-                            f"CLICK Add to cart [{winner.add_to_cart_element_index}] "
-                            f"→ {winner.title[:36]}"
-                        )
-                    else:
-                        action_override = action_summary
                     await self._emit_agent_sync(
                         send_json,
                         run_id,
                         browser_state,
                         agent_output,
                         step_number,
-                        action_override=action_override,
+                        action_override=action_summary,
                     )
 
                 metrics.callback_total_ms = (
@@ -672,8 +651,8 @@ class BrowserUseRunController:
             message = (
                 tool_state.last_reasoning
                 or (
-                    f"Selected '{tool_state.selected_product_title}' but checkout "
-                    "was not finished. Open /cart → /checkout or resume."
+                    f"Verified progress for '{tool_state.selected_product_title}', "
+                    "but the requested goal is not finished. Resume to continue."
                 )
             )
             self._run_manager.wait_for_user(session)
@@ -741,11 +720,7 @@ class BrowserUseRunController:
 
     @staticmethod
     def _resolve_start_navigation(start_url: str, intent: ShoppingIntent) -> str:
-        """Prefer a direct search URL on known demo storefronts."""
-        parsed = urlparse(start_url)
-        host = (parsed.hostname or "").lower()
-        if host in {"localhost", "127.0.0.1"} and intent.search_query:
-            return f"{parsed.scheme}://{parsed.netloc}/search?q={quote(intent.search_query)}"
+        """Start from the supplied page so the agent can inspect it autonomously."""
         return start_url
 
     @staticmethod
@@ -757,17 +732,17 @@ class BrowserUseRunController:
             return (
                 f"RESUME after user handoff. Task: {task.strip()}\n"
                 f"{intent_block}\n"
-                f"Re-observe. If wrong page, search exactly: {intent.search_query}\n"
-                "Low confidence → request_user_handoff."
+                "Re-observe the current page and continue only the explicitly "
+                "requested goal. Low confidence → request_user_handoff."
             )
 
         return (
             f"Task: {task.strip()}\n"
             f"{intent_block}\n"
-            f"1) Open/search EXACTLY: {intent.search_query}\n"
-            "2) Pick the best matching in-stock product (price + rating).\n"
-            "3) Click Add to cart, then mark_shopping_complete once cart has it.\n"
-            "4) request_user_handoff for login/OTP/CAPTCHA."
+            "Re-observe the current page and choose the smallest next action that "
+            "directly advances the user's goal. Do not add, navigate to cart, "
+            "open checkout, or submit an order unless explicitly requested.\n"
+            "request_user_handoff for login/OTP/CAPTCHA/payment confirmation."
         )
 
     async def _emit_agent_sync(

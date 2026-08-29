@@ -4,7 +4,7 @@ npm CLI cannot use a physical security key interactively. Use a **Granular Acces
 
 ## Step 1 — Create token (one time)
 
-1. Open https://www.npmjs.com/settings/strykerinside/tokens
+1. Open https://www.npmjs.com/settings/hardik21232323/tokens
 2. **Generate New Token** → **Granular Access Token**
 3. Name: `razorflow-sdk-publish`
 4. Expiration: 90 days (or your preference)
@@ -23,13 +23,13 @@ $env:NPM_TOKEN = "npm_paste_your_token_here"
 Or pass OTP if you also have an authenticator app configured:
 
 ```powershell
-npm publish -w @strykerinside/razorflow-protocol --access public --otp=123456
-npm publish -w @strykerinside/razorflow-browser --access public --otp=123456
-npm publish -w @strykerinside/razorflow-client --access public --otp=123456
+npm publish -w @hardik21232323/razorflow-protocol --access public --otp=123456
+npm publish -w @hardik21232323/razorflow-browser --access public --otp=123456
+npm publish -w @hardik21232323/razorflow-client --access public --otp=123456
 ```
 
 ## Published package names
 
-- `@strykerinside/razorflow-protocol`
-- `@strykerinside/razorflow-browser`
-- `@strykerinside/razorflow-client`
+- `@hardik21232323/razorflow-protocol`
+- `@hardik21232323/razorflow-browser`
+- `@hardik21232323/razorflow-client`

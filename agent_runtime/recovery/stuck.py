@@ -6,15 +6,35 @@ from agent_runtime.planner.planner import action_signature
 from agent_runtime.state.run_state import RunState
 
 
+def _url_indicates_checkout_flow(url: str) -> bool:
+    lowered = (url or "").lower()
+    return "/checkout" in lowered or "auth=login" in lowered
+
+
 def detect_stuck(state: RunState) -> str | None:
     history = state.action_history
     if len(history) < 2:
         return None
 
-    # Checkout goal: block redundant add-to-cart spam (not cart/checkout navigation)
-    if state.parsed_task.goal == "checkout" and "ADD_PHASE_COMPLETE" in " ".join(
-        state.memory.constraints
-    ):
+    add_phase_done = (
+        state.current_phase in {"checkout", "checkout_reached"}
+        or "ADD_PHASE_COMPLETE" in state.memory.constraints
+    )
+
+    if state.current_phase in {"checkout", "checkout_reached"} and len(history) >= 5:
+        reached_checkout = any(
+            _url_indicates_checkout_flow(e.page_url or "")
+            for e in history
+        )
+        if not reached_checkout:
+            last_urls = [e.page_url for e in history[-5:]]
+            if len(set(last_urls)) <= 2:
+                return (
+                    "Checkout phase: cart is ready. Open the cart if needed, then click "
+                    "Proceed to checkout / Checkout. Do NOT add products or use Sign in."
+                )
+
+    if state.parsed_task.goal == "checkout" and add_phase_done:
         last_click = history[-1]
         label = ""
         if last_click.action.target:
