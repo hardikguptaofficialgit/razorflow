@@ -11,7 +11,8 @@ from agent_runtime.observation.browser_state import BrowserPage, ObservedElement
 _CHECKOUT_CONTROL_RE = re.compile(
     r"\b(?:"
     r"checkout|proceed\s+to\s+(?:checkout|check|pay)|continue\s+to\s+checkout|"
-    r"go\s+to\s+checkout|continue\s+checkout|place\s+order"
+    r"go\s+to\s+checkout|continue\s+checkout|place\s+order|complete\s+purchase|"
+    r"pay\s+now|make\s+payment"
     r")\b",
     re.I,
 )

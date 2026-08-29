@@ -39,59 +39,86 @@ export function AgentSettingsModal({
   const [notice, setNotice] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!open) {
-      return;
-    }
+    if (!open) return;
+
     setDraft(loadAgentSettings());
+    setShowKey(false);
+    setAction("idle");
     setError(null);
     setNotice(null);
-    setAction("idle");
-  }, [open]);
+
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        onClose();
+      }
+    }
+
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    window.addEventListener("keydown", onKeyDown);
+
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener("keydown", onKeyDown);
+    };
+  }, [open, onClose]);
 
   const providerMeta = useMemo(
-    () => PROVIDER_OPTIONS.find((item) => item.id === draft.provider),
+    () => PROVIDER_OPTIONS.find(({ id }) => id === draft.provider),
     [draft.provider],
   );
 
-  if (!open) {
-    return null;
-  }
+  if (!open) return null;
 
-  function update<K extends keyof AgentSettings>(key: K, value: AgentSettings[K]) {
-    setDraft((prev) => ({ ...prev, [key]: value }));
+  const clearMessages = () => {
     setError(null);
     setNotice(null);
+  };
+
+  function update<K extends keyof AgentSettings>(
+    key: K,
+    value: AgentSettings[K],
+  ) {
+    setDraft((prev) => ({ ...prev, [key]: value }));
+    clearMessages();
   }
 
   function handleProviderChange(provider: PlannerProvider) {
     const models =
-      PROVIDER_OPTIONS.find((item) => item.id === provider)?.models ?? [];
+      PROVIDER_OPTIONS.find(({ id }) => id === provider)?.models ?? [];
+
     setDraft((prev) => ({
       ...prev,
       provider,
-      model: models.includes(prev.model) ? prev.model : models[0] ?? prev.model,
+      model: models.includes(prev.model)
+        ? prev.model
+        : models[0] ?? prev.model,
     }));
-    setError(null);
-    setNotice(null);
+
+    clearMessages();
   }
 
-  async function handleSave(event?: FormEvent) {
-    event?.preventDefault();
+  async function handleSave(event: FormEvent) {
+    event.preventDefault();
     setAction("saving");
-    setError(null);
-    setNotice(null);
+    clearMessages();
+
     try {
       if (draft.useByok && !draft.apiKey.trim()) {
         throw new Error("API key is required when BYOK is enabled.");
       }
+
       if (draft.useByok && !draft.model.trim()) {
         throw new Error("Model is required when BYOK is enabled.");
       }
+
       saveAgentSettings(draft);
       await onApply(draft);
-      setNotice("Settings saved.");
+      setNotice("Settings saved successfully.");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not save settings.");
+      setError(
+        err instanceof Error ? err.message : "Could not save settings.",
+      );
     } finally {
       setAction("idle");
     }
@@ -99,28 +126,32 @@ export function AgentSettingsModal({
 
   async function handleTest() {
     setAction("testing");
-    setError(null);
-    setNotice(null);
+    clearMessages();
+
     try {
       const result = await testAgentConnection(draft);
+
       if (!result.ok) {
         throw new Error(result.error || "Connection test failed.");
       }
+
       setNotice(
         draft.useByok
           ? "Connection successful. Your API key works."
           : "Backend reachable. Server default LLM will be used.",
       );
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Connection test failed.");
+      setError(
+        err instanceof Error ? err.message : "Connection test failed.",
+      );
     } finally {
       setAction("idle");
     }
   }
 
   function handleReset() {
-    const defaults = resetAgentSettings();
-    setDraft(defaults);
+    setDraft(resetAgentSettings());
+    setShowKey(false);
     setError(null);
     setNotice("Reset to defaults. Save to apply.");
   }
@@ -128,7 +159,11 @@ export function AgentSettingsModal({
   const busy = action !== "idle";
 
   return (
-    <div className="rf-settings" role="presentation" onClick={onClose}>
+    <div
+      className="rf-settings"
+      role="presentation"
+      onClick={onClose}
+    >
       <div
         className="rf-settings__dialog"
         role="dialog"
@@ -137,50 +172,76 @@ export function AgentSettingsModal({
         onClick={(event) => event.stopPropagation()}
       >
         <header className="rf-settings__header">
-          <div>
-            <h2 id="rf-settings-title">Agent settings</h2>
+          <div className="rf-settings__title-wrap">
+            <span className="rf-settings__eyebrow">AGENT</span>
+            <h2 id="rf-settings-title">Settings</h2>
             <p className="rf-settings__subtitle">
-              Bring your own API key or use the server default configuration.
+              Configure your model and agent behavior.
             </p>
           </div>
+
           <button
             type="button"
             className="rf-settings__close"
             aria-label="Close settings"
             onClick={onClose}
           >
-            ×
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden>
+              <path
+                d="M7 7l10 10M17 7 7 17"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+              />
+            </svg>
           </button>
         </header>
 
-        <div className="rf-settings__status">
-          <span
-            className={`rf-settings__status-dot${connected ? " rf-settings__status-dot--on" : ""}`}
-            aria-hidden
-          />
-          <div>
-            <p className="rf-settings__status-label">
+        <div
+          className={`rf-settings__status ${
+            connected
+              ? "rf-settings__status--connected"
+              : "rf-settings__status--offline"
+          }`}
+        >
+          <span className="rf-settings__status-dot" aria-hidden />
+
+          <div className="rf-settings__status-content">
+            <strong>
               {connected ? "Connected to backend" : "Backend offline"}
-            </p>
-            <p className="rf-settings__status-meta">
+            </strong>
+
+            <span>
               {configStatus?.message ||
                 (configStatus?.mode === "byok"
-                  ? `Using BYOK · ${configStatus.provider ?? draft.provider}`
+                  ? `Using BYOK · ${
+                      configStatus.provider ?? draft.provider
+                    }`
                   : "Using server default LLM")}
-            </p>
+            </span>
           </div>
         </div>
 
         <form className="rf-settings__form" onSubmit={handleSave}>
           <section className="rf-settings__section">
-            <h3>LLM provider</h3>
+            <div className="rf-settings__section-heading">
+              <div>
+                <h3>LLM provider</h3>
+                <p>Select the model provider used by the agent.</p>
+              </div>
+            </div>
+
             <label className="rf-settings__field">
               <span>Provider</span>
+
               <select
                 value={draft.provider}
                 onChange={(event) =>
-                  handleProviderChange(event.target.value as PlannerProvider)
+                  handleProviderChange(
+                    event.target.value as PlannerProvider,
+                  )
                 }
+                disabled={busy}
               >
                 {PROVIDER_OPTIONS.map((option) => (
                   <option key={option.id} value={option.id}>
@@ -191,31 +252,44 @@ export function AgentSettingsModal({
             </label>
 
             <label className="rf-settings__toggle">
+              <span className="rf-settings__toggle-copy">
+                <strong>Use my API key</strong>
+                <small>Bring your own provider credentials.</small>
+              </span>
+
               <input
                 type="checkbox"
                 checked={draft.useByok}
-                onChange={(event) => update("useByok", event.target.checked)}
+                onChange={(event) =>
+                  update("useByok", event.target.checked)
+                }
+                disabled={busy}
               />
-              <span>Use my API key (BYOK)</span>
             </label>
 
             {draft.useByok && (
-              <>
+              <div className="rf-settings__byok">
                 <label className="rf-settings__field">
                   <span>API key</span>
+
                   <div className="rf-settings__secret">
                     <input
                       type={showKey ? "text" : "password"}
                       value={draft.apiKey}
-                      onChange={(event) => update("apiKey", event.target.value)}
-                      placeholder="sk-…"
+                      onChange={(event) =>
+                        update("apiKey", event.target.value)
+                      }
+                      placeholder="Enter API key"
                       autoComplete="off"
                       spellCheck={false}
+                      disabled={busy}
                     />
+
                     <button
                       type="button"
-                      className="rf-settings__ghost"
+                      className="rf-settings__inline-action"
                       onClick={() => setShowKey((value) => !value)}
+                      disabled={busy}
                     >
                       {showKey ? "Hide" : "Show"}
                     </button>
@@ -224,27 +298,45 @@ export function AgentSettingsModal({
 
                 <label className="rf-settings__field">
                   <span>Model</span>
+
                   <input
                     list="rf-settings-models"
                     value={draft.model}
-                    onChange={(event) => update("model", event.target.value)}
-                    placeholder={providerMeta?.models[0] ?? "model id"}
+                    onChange={(event) =>
+                      update("model", event.target.value)
+                    }
+                    placeholder={
+                      providerMeta?.models[0] ?? "Enter model ID"
+                    }
+                    disabled={busy}
                   />
+
                   <datalist id="rf-settings-models">
                     {providerMeta?.models.map((model) => (
                       <option key={model} value={model} />
                     ))}
                   </datalist>
                 </label>
-              </>
+              </div>
             )}
           </section>
 
           <section className="rf-settings__section">
-            <h3>Agent behavior</h3>
+            <div className="rf-settings__section-heading">
+              <div>
+                <h3>Agent behavior</h3>
+                <p>Control creativity and execution limits.</p>
+              </div>
+            </div>
+
             <label className="rf-settings__field">
-              <span>Temperature ({draft.temperature.toFixed(2)})</span>
+              <div className="rf-settings__range-header">
+                <span>Temperature</span>
+                <output>{draft.temperature.toFixed(2)}</output>
+              </div>
+
               <input
+                className="rf-settings__range"
                 type="range"
                 min={0}
                 max={1.5}
@@ -253,11 +345,18 @@ export function AgentSettingsModal({
                 onChange={(event) =>
                   update("temperature", Number(event.target.value))
                 }
+                disabled={busy}
               />
+
+              <div className="rf-settings__range-labels">
+                <span>Precise</span>
+                <span>Creative</span>
+              </div>
             </label>
 
             <label className="rf-settings__field">
               <span>Max agent steps</span>
+
               <input
                 type="number"
                 min={5}
@@ -266,55 +365,89 @@ export function AgentSettingsModal({
                 onChange={(event) =>
                   update(
                     "maxAgentSteps",
-                    Math.max(5, Math.min(200, Number(event.target.value) || 40)),
+                    Math.max(
+                      5,
+                      Math.min(
+                        200,
+                        Number(event.target.value) || 40,
+                      ),
+                    ),
                   )
                 }
+                disabled={busy}
               />
             </label>
 
             <label className="rf-settings__toggle">
+              <span className="rf-settings__toggle-copy">
+                <strong>Shopping skill</strong>
+                <small>Allow shopping workflows and actions.</small>
+              </span>
+
               <input
                 type="checkbox"
                 checked={draft.shoppingSkillEnabled}
                 onChange={(event) =>
-                  update("shoppingSkillEnabled", event.target.checked)
+                  update(
+                    "shoppingSkillEnabled",
+                    event.target.checked,
+                  )
                 }
+                disabled={busy}
               />
-              <span>Enable shopping skill</span>
             </label>
           </section>
 
           {error && (
-            <p className="rf-settings__error" role="alert">
-              {error}
-            </p>
+            <div
+              className="rf-settings__message rf-settings__message--error"
+              role="alert"
+            >
+              <strong>Error</strong>
+              <span>{error}</span>
+            </div>
           )}
+
           {notice && (
-            <p className="rf-settings__notice" role="status">
-              {notice}
-            </p>
+            <div
+              className="rf-settings__message rf-settings__message--success"
+              role="status"
+            >
+              <strong>Done</strong>
+              <span>{notice}</span>
+            </div>
           )}
 
           <footer className="rf-settings__actions">
             <button
               type="button"
-              className="rf-settings__ghost"
+              className="rf-settings__reset"
               onClick={handleReset}
               disabled={busy}
             >
               Reset
             </button>
-            <button
-              type="button"
-              className="rf-settings__secondary"
-              onClick={() => void handleTest()}
-              disabled={busy}
-            >
-              {action === "testing" ? "Testing…" : "Test connection"}
-            </button>
-            <button type="submit" className="rf-settings__primary" disabled={busy}>
-              {action === "saving" ? "Saving…" : "Save"}
-            </button>
+
+            <div className="rf-settings__actions-right">
+              <button
+                type="button"
+                className="rf-settings__secondary"
+                onClick={() => void handleTest()}
+                disabled={busy}
+              >
+                {action === "testing"
+                  ? "Testing…"
+                  : "Test connection"}
+              </button>
+
+              <button
+                type="submit"
+                className="rf-settings__primary"
+                disabled={busy}
+              >
+                {action === "saving" ? "Saving…" : "Save changes"}
+              </button>
+            </div>
           </footer>
         </form>
       </div>

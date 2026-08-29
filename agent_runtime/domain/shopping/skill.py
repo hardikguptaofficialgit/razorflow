@@ -146,16 +146,29 @@ class ShoppingDomainSkill(DomainSkill):
         return nudges
 
     def planner_context_extra(self, state: RunState, page: BrowserPage | None) -> str:
+        lines: list[str] = []
+        if state.memory.remaining_items:
+            lines.append(
+                "NEXT ITEM: "
+                + state.memory.remaining_items[0]
+                + (
+                    f" (then: {', '.join(state.memory.remaining_items[1:3])})"
+                    if len(state.memory.remaining_items) > 1
+                    else ""
+                )
+            )
+        if state.memory.verified_items:
+            lines.append("VERIFIED IN CART: " + ", ".join(state.memory.verified_items[-4:]))
         if not page:
-            return ""
+            return "\n".join(lines)
         section = checkout_controls.format_checkout_controls_section(page)
         if section:
-            return section
-        if state.current_phase in {"checkout", "checkout_reached"}:
-            return (
+            lines.append(section)
+        elif state.current_phase in {"checkout", "checkout_reached"}:
+            lines.append(
                 "Checkout phase: use visible Proceed to checkout / Checkout controls from observation."
             )
-        return ""
+        return "\n".join(lines)
 
     def verify_action_result(
         self,
@@ -179,8 +192,8 @@ class ShoppingDomainSkill(DomainSkill):
         *,
         ok: bool,
         before: BrowserPage | None = None,
-    ) -> None:
-        action_result.apply_verified_progress(
+    ) -> bool:
+        return action_result.apply_verified_progress(
             state, action, page, ok=ok, before=before
         )
 

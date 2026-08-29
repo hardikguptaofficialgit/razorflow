@@ -71,10 +71,12 @@ def _phase_satisfied(phase: GoalPhase, state: RunState, page: BrowserPage) -> bo
         return is_product_details_page(page) and state.verified_progress_count >= 1
 
     if phase == "cart_updated":
-        return cart_satisfies_add_goal(state, page) and (
-            "verified_add_to_cart" in state.milestones
-            or state.verified_progress_count >= 1
-        )
+        if not cart_satisfies_add_goal(state, page):
+            return False
+        if "verified_add_to_cart" in state.milestones or state.verified_progress_count >= 1:
+            return True
+        verified = state.memory.verified_items
+        return bool(verified) and len(verified) >= state.parsed_task.item_count
 
     if phase == "cart_visible":
         return is_cart_page(page)
@@ -105,10 +107,14 @@ def _milestones_met(phase: GoalPhase, state: RunState) -> bool:
             state.memory.current_page.path if state.memory.current_page else ""
         )
     if phase == "cart_updated":
-        return (
-            cart_satisfies_add_goal(state, state.memory.current_page)
-            and "verified_add_to_cart" in state.milestones
-        )
+        page = state.memory.current_page
+        if not cart_satisfies_add_goal(state, page):
+            return False
+        if "verified_add_to_cart" in state.milestones:
+            return True
+        verified = state.memory.verified_items
+        target = state.parsed_task.item_count
+        return bool(verified) and len(verified) >= target
     if phase == "cart_visible":
         return "reached_cart" in state.milestones
     if phase in {"checkout", "checkout_reached", "purchase_reached"}:
@@ -159,7 +165,12 @@ def approve_completion(state: RunState, page: BrowserPage | None, *, source: str
         "cart_visible",
     }
     if state.verified_progress_count < 1 and not exempt_from_progress:
-        return False
+        if not (
+            phase == "cart_updated"
+            and cart_satisfies_add_goal(state, page)
+            and len(state.memory.verified_items) >= state.parsed_task.item_count
+        ):
+            return False
     if not is_goal_satisfied(state, page):
         return False
     if not milestones_met(state):

@@ -5,11 +5,16 @@ from __future__ import annotations
 import re
 from collections.abc import Callable
 
+from agent_runtime.domain.shopping.action_gate import _is_add_to_cart_action
 from agent_runtime.executor.actions import AgentAction, ElementTarget
 from agent_runtime.observation.browser_state import BrowserPage, ObservedElement, ObservedProduct
 
 _ELEMENT_ID_RE = re.compile(r"^e(\d+)$", re.I)
 _TOKEN_RE = re.compile(r"[a-z0-9]+", re.I)
+_ADD_PREFIX_RE = re.compile(
+    r"^(?:add(?:\s+to\s+(?:cart|bag|basket))?|buy(?:\s+now)?|purchase|get)\s+(?:for\s+)?",
+    re.I,
+)
 
 
 def _tokens(text: str) -> set[str]:
@@ -65,14 +70,9 @@ def refresh_shopping_action_target(
         return generic(action, page)
 
     needle = (action.target.description or action.target.match_text or "").strip()
-    lower = needle.lower()
-    if "add" in lower and "cart" in lower:
-        product_needle = (
-            lower.replace("add to cart for ", "")
-            .replace("add to cart", "")
-            .strip()
-        )
-        add_id, title = _find_product_add_button(page, product_needle or needle)
+    if _is_add_to_cart_action(action):
+        product_needle = _ADD_PREFIX_RE.sub("", needle).strip() or needle
+        add_id, title = _find_product_add_button(page, product_needle)
         if add_id:
             resolved_text = f"Add to cart for {title}" if title else needle
             new_target = ElementTarget(

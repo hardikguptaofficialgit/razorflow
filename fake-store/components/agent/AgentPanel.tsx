@@ -16,6 +16,10 @@ import { formatPrice } from "@/lib/format";
 import { StoreLogo } from "@/components/StoreLogo";
 import type { useAgentBridge } from "@/lib/agent/useAgentBridge";
 import { formatConfigStatus } from "@/lib/agent/agent-settings";
+import {
+  suggestionsForPhase,
+  type TaskSuggestion,
+} from "@/lib/agent/task-suggestions";
 
 type Bridge = ReturnType<typeof useAgentBridge>;
 type Voice = ReturnType<typeof useAgentVoice>;
@@ -35,6 +39,7 @@ interface AgentPanelProps {
   onCreateSession: () => void;
   onSwitchSession: (sessionId: string) => void;
   onSubmitTask: (task: string) => void;
+  onSuggestionClick?: (suggestion: TaskSuggestion) => void;
 }
 
 function ConnectionBanner({ bridge }: { bridge: Bridge }) {
@@ -207,12 +212,26 @@ export function AgentPanel({
   onCreateSession,
   onSwitchSession,
   onSubmitTask,
+  onSuggestionClick,
 }: AgentPanelProps) {
   const listRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const connected = bridge.status === "connected";
   const busy = isBusy(bridge.phase);
   const phase = phaseLabel(bridge.phase, connected);
+  const suggestions = suggestionsForPhase(bridge.phase, Boolean(bridge.runId));
+
+  function handleSuggestion(suggestion: TaskSuggestion) {
+    onTaskChange(suggestion.task);
+    if (onSuggestionClick) {
+      onSuggestionClick(suggestion);
+      return;
+    }
+    if (!busy && connected) {
+      onSubmitTask(suggestion.task);
+      onTaskChange("");
+    }
+  }
 
   useEffect(() => {
     listRef.current?.scrollTo({
@@ -397,6 +416,21 @@ export function AgentPanel({
                   Start a task to search, compare, add to cart, or checkout.
                   Each session keeps its own history.
                 </p>
+                <div className="rf-chat-suggestions" role="list">
+                  {suggestions.map((suggestion) => (
+                    <button
+                      key={suggestion.id}
+                      type="button"
+                      role="listitem"
+                      className="rf-agent-panel__suggestion"
+                      disabled={!connected || busy}
+                      onClick={() => handleSuggestion(suggestion)}
+                      data-rf-interactive
+                    >
+                      {suggestion.label}
+                    </button>
+                  ))}
+                </div>
               </div>
             ) : (
               bridge.timeline.map((item) => (
@@ -437,6 +471,21 @@ export function AgentPanel({
           )}
 
           <form className="rf-agent-compose" onSubmit={handleSubmit}>
+            {!busy && suggestions.length > 0 ? (
+              <div className="rf-agent-suggestions" aria-label="Quick prompts">
+                {suggestions.slice(0, 4).map((suggestion) => (
+                  <button
+                    key={suggestion.id}
+                    type="button"
+                    disabled={!connected}
+                    onClick={() => handleSuggestion(suggestion)}
+                    data-rf-interactive
+                  >
+                    {suggestion.label}
+                  </button>
+                ))}
+              </div>
+            ) : null}
             {voice.supported && (
               <button
                 type="button"

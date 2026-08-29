@@ -24,6 +24,10 @@ def build_planning_context(state: RunState, page: BrowserPage | None) -> str:
         )
     if state.memory.remaining_work:
         lines.append("REMAINING: " + "; ".join(state.memory.remaining_work[:3]))
+    if state.memory.remaining_items:
+        lines.append("NEXT ITEMS: " + ", ".join(state.memory.remaining_items[:3]))
+    if state.memory.current_target:
+        lines.append(f"CURRENT TARGET: {state.memory.current_target}")
     if spec:
         forbidden = sorted(active_forbidden(spec, phase))
         if forbidden:

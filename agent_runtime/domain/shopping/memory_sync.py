@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from agent_runtime.domain.shopping.action_result import _matches_requested_item
 from agent_runtime.domain.shopping.helpers import allows_add_to_cart, shopping_intent
 from agent_runtime.domain.shopping.page_semantics import is_cart_page
 from agent_runtime.domain.shopping.search_state import (
@@ -42,8 +43,18 @@ def sync_memory_from_observation(state: RunState, page: BrowserPage | None) -> N
     cart_count = _cart_count(page)
     current_phase = state.current_phase
 
-    if not memory.remaining_items and spec and spec.remaining_items:
+    if not memory.remaining_items and spec and spec.remaining_items and memory.items_added == 0:
         memory.remaining_items = list(spec.remaining_items)
+
+    if memory.remaining_items and memory.verified_items:
+        memory.remaining_items = [
+            item
+            for item in memory.remaining_items
+            if not any(
+                _matches_requested_item(verified, item)
+                for verified in memory.verified_items
+            )
+        ]
 
     if current_phase in {"checkout", "checkout_reached"} or (
         intent == "checkout" and "ADD_PHASE_COMPLETE" in memory.constraints

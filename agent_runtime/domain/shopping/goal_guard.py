@@ -12,7 +12,8 @@ from agent_runtime.domain.shopping.action_gate import (
     _is_search_action,
     classify_action,
 )
-from agent_runtime.domain.shopping.helpers import allows_add_to_cart, shopping_intent
+from agent_runtime.domain.shopping.action_result import _matches_requested_item
+from agent_runtime.domain.shopping.helpers import allows_add_to_cart, multi_distinct_item_goal, shopping_intent
 from agent_runtime.domain.shopping.search_state import (
     browse_page_add_task,
     entity_visible_on_page,
@@ -62,6 +63,24 @@ def action_advances_goal(state: RunState, action: AgentAction) -> tuple[bool, st
 
     if goal_quota_met(state) and _is_add_to_cart_action(action):
         return False, "add_to_cart blocked — required item count already in cart"
+
+    if (
+        allows_add
+        and _is_add_to_cart_action(action)
+        and multi_distinct_item_goal(state)
+        and action.target
+    ):
+        label = (
+            f"{action.target.description} {action.target.match_text} {action.reason}"
+        ).lower()
+        entity = search_entity(state)
+        for verified in state.memory.verified_items:
+            if _matches_requested_item(verified, label):
+                if entity and not _matches_requested_item(verified, entity):
+                    return (
+                        False,
+                        f"'{verified}' already in cart — add '{entity}' next, do not increase quantity",
+                    )
 
     if needs_search(state, page):
         if action.type == "scroll":

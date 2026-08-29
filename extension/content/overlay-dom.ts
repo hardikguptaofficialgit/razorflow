@@ -1,6 +1,7 @@
 import type { AgentState } from "../shared/types";
 import { getBrandLogoUrl, getDockTextureUrl } from "../shared/brand";
 import { OVERLAY_ROOT_ID } from "../shared/types";
+import { refreshTaskSuggestions } from "./overlay-suggestions";
 
 export type OverlayRunPhase =
   | "running"
@@ -21,6 +22,7 @@ export interface OverlayElements {
   sendTaskButton: HTMLButtonElement;
   collapseTextButton: HTMLButtonElement;
   composePanel: HTMLDivElement;
+  suggestionsContainer: HTMLDivElement;
   voiceButton: HTMLButtonElement;
   toast: HTMLDivElement;
   waitingPanel: HTMLDivElement;
@@ -143,6 +145,8 @@ export function createOverlayRoot(): OverlayElements {
       </button>
 
       <div class="rf-dock-compose">
+        <div class="rf-dock-suggestions" aria-label="Quick prompts" hidden></div>
+        <div class="rf-dock-compose-row">
         <input
           type="text"
           class="rf-dock-input"
@@ -166,6 +170,7 @@ export function createOverlayRoot(): OverlayElements {
           aria-label="Close input"
           title="Close"
         ></button>
+        </div>
       </div>
 
       <span class="rf-dock-sep rf-dock-voice-sep" aria-hidden="true"></span>
@@ -226,6 +231,9 @@ function collectOverlayElements(root: HTMLDivElement): OverlayElements {
       '[data-action="collapse-text"]',
     ) as HTMLButtonElement,
     composePanel: root.querySelector(".rf-dock-compose") as HTMLDivElement,
+    suggestionsContainer: root.querySelector(
+      ".rf-dock-suggestions",
+    ) as HTMLDivElement,
     voiceButton: root.querySelector(
       '[data-action="voice"]',
     ) as HTMLButtonElement,
@@ -279,6 +287,7 @@ export function applyRunPhaseToDom(
   message?: string,
 ): void {
   elements.root.setAttribute("data-run-phase", phase);
+  refreshTaskSuggestions(elements, phase);
 
   const showToast = (text: string, error = false): void => {
     elements.toast.hidden = false;

@@ -33,7 +33,7 @@ def apply_verified_progress(
     *,
     ok: bool,
     before: BrowserPage | None = None,
-) -> None:
-    state.skill().apply_verified_progress(
+) -> bool:
+    return state.skill().apply_verified_progress(
         state, action, page, ok=ok, before=before
     )

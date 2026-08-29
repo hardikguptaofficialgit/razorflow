@@ -3,19 +3,58 @@
 from __future__ import annotations
 
 from agent_runtime.executor.actions import AgentAction
+from agent_runtime.domain.shopping.action_gate import _is_add_to_cart_action
 from agent_runtime.domain.shopping.action_gate import _is_checkout_action
 from agent_runtime.domain.shopping.checkout_flow import is_checkout_flow_page
+from agent_runtime.domain.shopping.helpers import goal_item_phrase, multi_distinct_item_goal
 from agent_runtime.domain.shopping.page_semantics import is_cart_page, is_search_results_page
-from agent_runtime.domain.shopping.search_state import entity_in_search, search_entity
+from agent_runtime.domain.shopping.search_state import entity_search_tokens, search_entity
 from agent_runtime.observation.browser_state import BrowserPage
 from agent_runtime.state.run_state import RunState
 
 
+def _word_tokens(text: str) -> tuple[str, ...]:
+    import re
+
+    return tuple(re.findall(r"[a-z0-9]+", text.lower()))
+
+
 def _matches_requested_item(title: str, requested: str) -> bool:
     """Use observed product names, not an LLM-provided button label, for cart credit."""
-    title_tokens = set(title.lower().split())
-    requested_tokens = set(requested.lower().split())
-    return bool(title_tokens and requested_tokens and title_tokens & requested_tokens)
+    for candidate in (requested, goal_item_phrase(requested)):
+        title_tokens = set(title.lower().split())
+        requested_tokens = set(candidate.lower().split())
+        if title_tokens and requested_tokens and title_tokens & requested_tokens:
+            return True
+        tokens = entity_search_tokens(candidate)
+        if tokens:
+            title_words = _word_tokens(title)
+            overlap = sum(
+                1
+                for token in tokens
+                if any(token in word or word in token for word in title_words)
+            )
+            if overlap >= max(1, (len(tokens) + 1) // 2):
+                return True
+    return False
+
+
+def _add_click_label(action: AgentAction) -> str:
+    if action.type != "click" or action.target is None:
+        return ""
+    return (action.target.description or action.target.match_text or "").lower()
+
+
+def _is_add_to_cart_click(action: AgentAction) -> bool:
+    return _is_add_to_cart_action(action)
+
+
+def _current_add_target(state: RunState) -> str:
+    if state.memory.remaining_items:
+        return state.memory.remaining_items[0]
+    if state.memory.current_target:
+        return state.memory.current_target
+    return search_entity(state)
 
 
 def _product_for_target(
@@ -33,6 +72,35 @@ def _product_for_target(
     return None
 
 
+def _add_targets_wrong_product(
+    state: RunState,
+    action: AgentAction,
+    *,
+    before: BrowserPage | None,
+    after: BrowserPage | None,
+) -> bool:
+    if not _is_add_to_cart_click(action):
+        return False
+    target = _current_add_target(state)
+    if not target:
+        return False
+    added_title = _product_for_target(
+        action.target.element_id if action.target else None,
+        before,
+        after,
+    )
+    if added_title and not _matches_requested_item(added_title, target):
+        return True
+    if added_title and state.memory.verified_items:
+        if multi_distinct_item_goal(state):
+            for verified in state.memory.verified_items:
+                if _matches_requested_item(added_title, verified) and not _matches_requested_item(
+                    verified, target
+                ):
+                    return True
+    return False
+
+
 def verify_action_result(
     state: RunState,
     action: AgentAction,
@@ -46,23 +114,23 @@ def verify_action_result(
         return False
 
     if not success or verified is False:
-        if _default_verify(action, before, after):
+        if _default_verify(state, action, before, after):
             return True
     if not success:
         return False
     if verified is True:
-        if action.type == "scroll" and not _default_verify(action, before, after):
+        if action.type == "scroll" and not _default_verify(state, action, before, after):
             return False
         if _is_checkout_action(action) and not is_checkout_flow_page(after):
             return False
         return True
 
-    if after is None:
-        return False
-
     verification = action.verification
     if verification is None:
-        return _default_verify(action, before, after)
+        ok = _default_verify(state, action, before, after)
+        if ok and _add_targets_wrong_product(state, action, before=before, after=after):
+            return False
+        return ok
 
     if verification.url_contains and verification.url_contains not in after.url:
         return False
@@ -86,6 +154,7 @@ def _cart_items(page: BrowserPage | None) -> int:
 
 
 def _default_verify(
+    state: RunState,
     action: AgentAction,
     before: BrowserPage | None,
     after: BrowserPage | None,
@@ -155,13 +224,15 @@ def _default_verify(
     if action.type == "go_back":
         return before is not None and before.url != after.url
     if action.type == "click":
-        label = ""
-        if action.target:
-            label = (action.target.description or action.target.match_text or "").lower()
+        label = _add_click_label(action)
         if "remove" in label:
             return _cart_items(after) < _cart_items(before)
-        if "add" in label and "cart" in label:
-            return _cart_items(after) > _cart_items(before)
+        if _is_add_to_cart_click(action):
+            if _cart_items(after) <= _cart_items(before):
+                return False
+            if _add_targets_wrong_product(state, action, before=before, after=after):
+                return False
+            return True
         if _cart_items(after) > _cart_items(before):
             return True
         if _is_checkout_action(action):
@@ -181,17 +252,18 @@ def apply_verified_progress(
     *,
     ok: bool,
     before: BrowserPage | None = None,
-) -> None:
+) -> bool:
+    """Apply verified progress. Returns True when goal-relevant state advanced."""
     if not ok:
-        return
+        return False
     if action.type == "scroll" and "verified_search" not in state.milestones:
         spec = state.task_spec
         intent = spec.intent if spec else state.parsed_task.goal
         if intent in {"search", "compare"} and page and not is_search_results_page(page):
-            return
+            return False
     state.verified_progress_count += 1
     if page is None:
-        return
+        return True
 
     if action.type == "search" or (
         action.type == "type"
@@ -217,10 +289,8 @@ def apply_verified_progress(
         state.memory.note_completed("search")
 
     if action.type == "click":
-        label = ""
-        if action.target:
-            label = (action.target.description or action.target.match_text or "").lower()
-        if "add" in label and "cart" in label:
+        label = _add_click_label(action)
+        if _is_add_to_cart_click(action):
             added_title = _product_for_target(
                 action.target.element_id if action.target else None, before, page
             )
@@ -238,7 +308,7 @@ def apply_verified_progress(
                     state.memory.note_fact(
                         f"Ignored unrelated cart addition: {added_title}"
                     )
-                return
+                return False
             state.milestones.add("verified_add_to_cart")
             state.memory.items_added += 1
             state.memory.note_completed("add_to_cart")
@@ -267,8 +337,15 @@ def apply_verified_progress(
                         break
             if added_title and added_title not in state.memory.verified_items:
                 state.memory.verified_items.append(added_title)
-            if state.memory.remaining_items:
+            if multi_distinct_item_goal(state) and state.memory.remaining_items:
                 state.memory.remaining_items.pop(0)
+            elif (
+                not multi_distinct_item_goal(state)
+                and state.memory.items_added >= state.parsed_task.item_count
+            ):
+                state.memory.remaining_items = []
+            elif state.memory.remaining_items:
+                pass
             elif state.parsed_task.product_hints and state.memory.items_added <= len(
                 state.parsed_task.product_hints
             ):
@@ -282,3 +359,4 @@ def apply_verified_progress(
         state.milestones.add("reached_cart")
     if page and is_checkout_flow_page(page):
         state.milestones.add("reached_checkout")
+    return True

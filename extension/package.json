@@ -4,7 +4,8 @@
   "version": "0.1.0",
   "scripts": {
     "build": "node scripts/build.mjs",
-    "watch": "node scripts/build.mjs --watch"
+    "watch": "node scripts/build.mjs --watch",
+    "test:suggestions": "node scripts/test-suggestions.mjs"
   },
   "devDependencies": {
     "@types/chrome": "^0.0.287",

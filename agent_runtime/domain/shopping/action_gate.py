@@ -2,11 +2,27 @@
 
 from __future__ import annotations
 
+import re
+
 from agent_runtime.domain.shopping.checkout_controls import is_checkout_control_element
-from agent_runtime.observation.browser_state import ObservedElement
-from agent_runtime.domain.shopping.helpers import allows_add_to_cart
+from agent_runtime.executor.actions import AgentAction
+from agent_runtime.observation.browser_state import BrowserPage, ObservedElement
+from agent_runtime.domain.shopping.helpers import allows_add_to_cart, multi_distinct_item_goal
 from agent_runtime.domain.shopping.spec import GoalPhase, forbidden_for_phase
+from agent_runtime.state.run_state import RunState
 from agent_runtime.task.spec import TaskSpec
+
+_ADD_MARKERS = (
+    "add to cart",
+    "add to bag",
+    "add to basket",
+    "add item",
+    "buy now",
+    "buy it",
+    "add for",
+)
+_CART_WORDS = ("cart", "bag", "basket")
+_ADD_VERB_RE = re.compile(r"\b(add|buy|purchase|get)\b", re.I)
 
 _CHECKOUT_MARKERS = (
     "checkout",
@@ -23,6 +39,19 @@ _PRODUCT_NAV_MARKERS = (
     "open product",
     "see details",
     "learn more",
+)
+_NAV_LINK_MARKERS = (
+    "about",
+    "contact",
+    "privacy",
+    "terms",
+    "help",
+    "faq",
+    "careers",
+    "blog",
+    "press",
+    "shipping",
+    "returns",
 )
 
 
@@ -83,7 +112,15 @@ def _is_add_to_cart_action(action: AgentAction) -> bool:
     if action.type != "click":
         return False
     blob = _action_blob(action)
-    return "add" in blob and "cart" in blob
+    if any(marker in blob for marker in _ADD_MARKERS):
+        return True
+    if _ADD_VERB_RE.search(blob) and any(word in blob for word in _CART_WORDS):
+        return True
+    if "buy now" in blob or "buy it now" in blob:
+        return True
+    if _ADD_VERB_RE.search(blob) and "remove" not in blob and "address" not in blob:
+        return True
+    return False
 
 
 def _is_search_action(action: AgentAction) -> bool:
@@ -109,9 +146,12 @@ def _is_product_details_action(action: AgentAction) -> bool:
         return False
     if any(marker in blob for marker in _PRODUCT_NAV_MARKERS):
         return True
-    # Product title/link click on search results (link role, not add-to-cart).
     if action.target and action.target.role == "link":
-        if "add" not in blob and "cart" not in blob:
+        if any(nav in blob for nav in _NAV_LINK_MARKERS):
+            return False
+        if "/product" in blob:
+            return True
+        if "add" not in blob and "cart" not in blob and len(blob.split()) >= 2:
             return True
     return False
 
@@ -156,7 +196,16 @@ def filter_forbidden_actions(
     if not allows_add_to_cart(spec):
         forbidden = forbidden | frozenset({"add_to_cart", "checkout", "payment"})
     if state is not None:
-        if state.memory.items_added >= state.parsed_task.item_count and state.parsed_task.item_count > 0:
+        distinct_added = len(state.memory.verified_items)
+        target_count = state.parsed_task.item_count
+        quota_met = state.memory.items_added >= target_count
+        if target_count > 0 and quota_met:
+            forbidden = forbidden | frozenset({"add_to_cart"})
+        elif (
+            target_count > 0
+            and multi_distinct_item_goal(state)
+            and distinct_added >= target_count
+        ):
             forbidden = forbidden | frozenset({"add_to_cart"})
 
     kept: list[AgentAction] = []

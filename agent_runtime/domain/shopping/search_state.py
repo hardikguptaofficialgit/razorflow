@@ -48,6 +48,10 @@ def _url_query(page: BrowserPage) -> str:
 
 
 def search_entity(state: RunState) -> str:
+    if state.memory.remaining_items:
+        return state.memory.remaining_items[0]
+    if state.memory.current_target:
+        return state.memory.current_target
     spec = state.task_spec
     if spec and spec.entities:
         return spec.entities[0]

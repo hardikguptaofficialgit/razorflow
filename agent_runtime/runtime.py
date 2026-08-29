@@ -474,7 +474,24 @@ class AgentRuntime:
             before=before,
             after=page,
         )
-        apply_verified_progress(state, action, page, ok=ok, before=before)
+        progress_applied = apply_verified_progress(
+            state, action, page, ok=ok, before=before
+        )
+        if ok and not progress_applied and action.type == "click":
+            ok = False
+            target = (
+                state.memory.remaining_items[0]
+                if state.memory.remaining_items
+                else state.memory.current_target or "the next item"
+            )
+            state.planner_nudge = (
+                "The last add did not advance the multi-item goal. "
+                f"Do not repeat verified products or increase quantity. "
+                f"Re-observe the page and add: {target}."
+            )
+
+        sync_memory_from_observation(state, page)
+        update_milestones(state, page)
         phase_changed = try_advance_phase(state, page)
         if phase_changed:
             state.pending_actions = []
@@ -483,6 +500,11 @@ class AgentRuntime:
                 f"Goal phase is now {state.current_phase}. "
                 "Do not repeat completed work. Plan only actions for the current phase."
             )
+
+        add_categories = state.skill().classify_action(action)
+        if "add_to_cart" in add_categories or not ok:
+            state.pending_actions = []
+            state.pending_action_index = 0
 
         _record_action_metrics(state, action, ok=ok, success=success, verified=verified)
 

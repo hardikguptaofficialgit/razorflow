@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 
 from agent_runtime.executor.actions import AgentAction, ElementTarget
+from agent_runtime.domain.shopping.action_gate import _is_add_to_cart_action
 from agent_runtime.observation.browser_state import BrowserPage, ObservedElement
 
 _ELEMENT_ID_RE = re.compile(r"^e(\d+)$", re.I)
@@ -76,6 +77,22 @@ def _element_still_valid(page: BrowserPage, element_id: str | None, needle: str)
     return False
 
 
+def _find_product_add_by_needle(page: BrowserPage, needle: str) -> ObservedElement | None:
+    best_id: str | None = None
+    best_score = 0.0
+    for product in page.products:
+        score = _score_text(needle, product.title)
+        if score > best_score and product.add_element_id:
+            best_score = score
+            best_id = product.add_element_id
+    if not best_id or best_score < 0.4:
+        return None
+    for el in page.elements:
+        if el.element_id == best_id and el.enabled:
+            return el
+    return None
+
+
 def refresh_action_target(action: AgentAction, page: BrowserPage | None) -> AgentAction:
     """Return a copy of the action with target refreshed from the current page."""
     if page is None or action.target is None:
@@ -89,6 +106,17 @@ def refresh_action_target(action: AgentAction, page: BrowserPage | None) -> Agen
 
     if _element_still_valid(page, target.element_id, needle):
         return action
+
+    if action.type == "click" and _is_add_to_cart_action(action) and needle:
+        product_el = _find_product_add_by_needle(page, needle)
+        if product_el:
+            new_target = ElementTarget(
+                element_id=product_el.element_id,
+                role=target.role,
+                description=needle or target.description,
+                match_text=needle or target.match_text,
+            )
+            return action.model_copy(update={"target": new_target})
 
     resolved_id: str | None = None
     resolved_text = needle

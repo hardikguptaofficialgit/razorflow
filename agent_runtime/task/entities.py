@@ -73,7 +73,7 @@ def _strip_wrappers(text: str) -> str:
     cleaned = _TRAILING_SITE.sub("", cleaned)
     cleaned = _TRAILING_POLITE.sub("", cleaned)
     cleaned = re.sub(
-        r"\s+(?:to|in)\s+(?:my\s+)?(?:cart|bag|basket)\b.*$",
+        r"\s+(?:into\s+)?(?:to\s+)?(?:in\s+)?(?:my\s+)?(?:cart|bag|basket)\b.*$",
         "",
         cleaned,
         flags=re.I,
@@ -122,7 +122,13 @@ def extract_entity_phrases(task: str) -> tuple[str, ...]:
             flags=re.I,
         )
         working = re.sub(
-            r"\b(?:in\s+)?(?:to\s+)?(?:my\s+)?(?:cart|bag|basket)\b.*$",
+            r"\b(?:into\s+)?(?:to\s+)?(?:in\s+)?(?:my\s+)?(?:cart|bag|basket)\b.*$",
+            "",
+            working,
+            flags=re.I,
+        )
+        working = re.sub(
+            r",\s*(?:inspect|compare|choose|pick).*$",
             "",
             working,
             flags=re.I,

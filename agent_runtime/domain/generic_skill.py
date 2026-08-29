@@ -165,9 +165,10 @@ class GenericDomainSkill(DomainSkill):
         *,
         ok: bool,
         before: BrowserPage | None = None,
-    ) -> None:
+    ) -> bool:
         if ok:
             state.verified_progress_count += 1
+        return ok
 
     def refresh_action_target(
         self, action: AgentAction, page: BrowserPage | None

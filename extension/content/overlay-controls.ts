@@ -6,6 +6,10 @@ import {
   ICON_SEND,
   setButtonIcon,
 } from "./overlay-icons";
+import {
+  refreshTaskSuggestions,
+  registerSuggestionTaskStarter,
+} from "./overlay-suggestions";
 
 function applyInputContrast(input: HTMLInputElement): void {
   input.style.setProperty("color", "#f5f5f7", "important");
@@ -19,6 +23,11 @@ function expandInput(elements: OverlayElements): void {
   elements.textToggleButton.setAttribute("aria-expanded", "true");
   elements.textToggleButton.dataset.active = "true";
   applyInputContrast(elements.textInput);
+  const runPhase = elements.root.getAttribute("data-run-phase") ?? "idle";
+  refreshTaskSuggestions(
+    elements,
+    runPhase as import("./overlay-dom").OverlayRunPhase,
+  );
   window.requestAnimationFrame(() => {
     elements.textInput.focus({ preventScroll: true });
     applyInputContrast(elements.textInput);
@@ -73,8 +82,8 @@ export function bindOverlayControls(elements: OverlayElements): void {
     collapseInput(elements);
   });
 
-  const submitTask = (): void => {
-    const task = textInput.value.trim();
+  const submitTask = (taskOverride?: string): void => {
+    const task = (taskOverride ?? textInput.value).trim();
     if (!task) {
       expandInput(elements);
       return;
@@ -90,6 +99,11 @@ export function bindOverlayControls(elements: OverlayElements): void {
     collapseInput(elements);
     showToast(elements, "Starting task...");
   };
+
+  registerSuggestionTaskStarter((task) => {
+    textInput.value = task;
+    submitTask(task);
+  });
 
   sendTaskButton.addEventListener("click", (event) => {
     event.preventDefault();

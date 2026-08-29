@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
-from typing import Any
+import re
+from typing import TYPE_CHECKING, Any
 
 from agent_runtime.task.spec import TaskSpec
+
+if TYPE_CHECKING:
+    from agent_runtime.state.run_state import RunState
 
 
 def shopping_intent(spec: TaskSpec | None) -> str:
@@ -53,3 +57,22 @@ def pack_shopping_metadata(**fields: Any) -> dict[str, Any]:
         "prefer_best",
     }})
     return base
+
+
+def multi_distinct_item_goal(state: "RunState") -> bool:
+    """True when the user asked for multiple different products (not same-SKU qty)."""
+    hints = state.parsed_task.product_hints
+    if len(hints) >= 2:
+        return True
+    spec = state.task_spec
+    if spec and len(spec.entities) >= 2:
+        return True
+    if spec and len(spec.remaining_items) >= 2:
+        return True
+    return False
+
+
+def goal_item_phrase(item: str) -> str:
+    """Strip leading quantity from hints like '2 snacks' -> 'snacks'."""
+    stripped = re.sub(r"^\d+\s+", "", item.strip())
+    return stripped or item.strip()

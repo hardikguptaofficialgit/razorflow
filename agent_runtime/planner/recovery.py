@@ -36,9 +36,19 @@ def empty_plan_nudge(
             + blocked_note
         )
     if phase == "cart_updated":
+        remaining = state.memory.remaining_items
+        needed = max(state.parsed_task.item_count - state.memory.items_added, 0)
+        if needed <= 0:
+            return (
+                base
+                + "Cart quota is met — verify cart contents and stop or proceed per goal."
+                + blocked_note
+            )
+        target = remaining[0] if remaining else "the requested product"
         return (
             base
-            + "Add the requested product using an Add to cart control elementId."
+            + f"Add '{target}' using a visible add/buy control elementId "
+            f"({needed} more needed). Re-observe before clicking."
             + blocked_note
         )
     return base + "Return one concrete click, type, or navigate action." + blocked_note

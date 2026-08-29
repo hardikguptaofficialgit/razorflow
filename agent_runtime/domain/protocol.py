@@ -116,7 +116,7 @@ class DomainSkill(ABC):
         *,
         ok: bool,
         before: "BrowserPage | None" = None,
-    ) -> None: ...
+    ) -> bool: ...
 
     @abstractmethod
     def refresh_action_target(
