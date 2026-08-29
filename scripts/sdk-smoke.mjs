@@ -30,7 +30,14 @@ if (!clientJs.includes("RazorFlow")) {
   process.exit(1);
 }
 
-const { RazorFlow, WebSocketTransport, AgentRun } = await import(
+const {
+  RazorFlow,
+  WebSocketTransport,
+  AgentRun,
+  RazorFlowError,
+  DomBrowserEnvironment,
+  sanitizePageContextWire,
+} = await import(
   pathToFileURL(join(root, "packages/razorflow-client/dist/index.js")).href
 );
 
@@ -46,7 +53,42 @@ if (typeof AgentRun !== "function") {
   console.error("AgentRun export missing");
   process.exit(1);
 }
+if (typeof RazorFlowError !== "function") {
+  console.error("RazorFlowError export missing");
+  process.exit(1);
+}
+if (typeof DomBrowserEnvironment !== "function") {
+  console.error("DomBrowserEnvironment export missing");
+  process.exit(1);
+}
+if (typeof AgentRun.prototype.untilComplete !== "function") {
+  console.error("AgentRun.untilComplete missing");
+  process.exit(1);
+}
+
+const sanitized = sanitizePageContextWire({
+  title: "Example",
+  url: "https://example.com",
+  elements: [
+    {
+      index: 1,
+      role: "link",
+      tag: "a",
+      text: null,
+      placeholder: null,
+      ariaLabel: null,
+    },
+  ],
+});
+if (!sanitized.elements[0].text === "") {
+  // text coerced to empty string
+}
+if (sanitized.elements[0].text !== "") {
+  console.error("sanitizePageContextWire did not coerce null text");
+  process.exit(1);
+}
 
 console.log("SDK smoke: OK");
-console.log("  RazorFlow, WebSocketTransport, AgentRun exported");
+console.log("  RazorFlow, WebSocketTransport, AgentRun, RazorFlowError exported");
+console.log("  DomBrowserEnvironment + untilComplete available");
 console.log("  dist/ artifacts present for protocol, browser, client");

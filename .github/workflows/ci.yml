@@ -1,0 +1,60 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+jobs:
+  python:
+    name: Python (no-LLM)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r agent-backend/requirements.txt
+          pip install pytest pytest-asyncio
+      - name: Run tests
+        run: bash scripts/ci-no-llm-pytest.sh
+
+  sdk:
+    name: SDK build & tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+      - run: npm ci
+      - run: npm run build:sdk
+      - run: npm run typecheck:sdk
+      - run: npm run test:sdk
+      - run: npm run test:sdk:clean-install
+      - name: Verify publishable packages (dry-run)
+        run: |
+          npm pack -w @hardik21232323/razorflow-protocol --dry-run
+          npm pack -w @hardik21232323/razorflow-browser --dry-run
+          npm pack -w @hardik21232323/razorflow-client --dry-run
+
+  extension:
+    name: Extension build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+      - run: npm ci
+      - run: npm run build:sdk
+      - name: Build extension
+        run: |
+          cd extension
+          npm install
+          npm run build

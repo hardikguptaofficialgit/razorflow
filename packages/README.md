@@ -18,5 +18,6 @@ npm install @hardik21232323/razorflow-client @hardik21232323/razorflow-browser
 npm install
 npm run build:sdk
 npm run test:sdk
-npm run publish:sdk   # requires npm login + 2FA
+npm run test:sdk:clean-install
+npm run publish:sdk   # protocol → browser → client; requires npm login
 ```

@@ -54,6 +54,9 @@ export type ContentCommand =
     }
   | { type: "RUN_DEMO_FLOW"; text?: string }
   | { type: "NAVIGATE_URL"; url: string }
+  | { type: "SCROLL_PAGE"; direction: "up" | "down" | "top" | "bottom"; amountPx: number }
+  | { type: "WAIT"; durationMs: number }
+  | { type: "GO_BACK" }
   | { type: "ENTER_WAITING_FOR_USER"; message: string }
   | { type: "EXIT_WAITING_MODE" }
   | { type: "SHOW_PAYMENT_CONFIRMATION"; proposal: PaymentLinkProposal }

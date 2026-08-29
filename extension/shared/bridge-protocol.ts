@@ -1,44 +1,18 @@
+import type { ActionStep } from "@hardik21232323/razorflow-protocol";
 import type { PaymentAuditSnapshot } from "./audit";
 import type { PaymentLinkProposal, PaymentLinkResult } from "./payment-link";
 import type { PageContext } from "./page-context";
-import type { AgentState, TargetRole } from "./types";
+import type { TargetRole } from "./types";
 import type { RunTimelineSnapshot } from "./run-timeline";
+
+export type { ActionStep } from "@hardik21232323/razorflow-protocol";
 
 export type BridgeConnectionStatus =
   | "connected"
   | "connecting"
   | "disconnected";
 
-export type ActionStep =
-  | { action: "set_state"; state: AgentState }
-  | {
-      action: "type_in_element";
-      role: TargetRole;
-      text: string;
-      elementIndex?: number;
-      matchText?: string;
-    }
-  | {
-      action: "click_element";
-      role: TargetRole;
-      elementIndex?: number;
-      matchText?: string;
-    }
-  | {
-      action: "highlight_element";
-      role: TargetRole;
-      elementIndex?: number;
-      matchText?: string;
-    }
-  | { action: "navigate_url"; url: string }
-  | { action: "wait_for_user" }
-  | {
-      action: "ready_for_payment_link";
-      title: string;
-      description: string;
-      amountPaise: number;
-      currency: string;
-    };
+export type { PaymentLinkProposal } from "./payment-link";
 
 export interface StartRunMessage {
   type: "START_RUN";

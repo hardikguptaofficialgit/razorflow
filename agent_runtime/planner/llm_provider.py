@@ -34,11 +34,13 @@ class ChainLLMProvider:
         user: str,
         *,
         screenshot_data_url: str | None = None,
+        run_config: object | None = None,
     ) -> PlannerOutput:
         raw = complete_planner_json(
             system_prompt=system,
             user_prompt=user,
             screenshot_data_url=screenshot_data_url,
+            run_config=run_config,
         )
         return _parse_planner_output(raw)
 

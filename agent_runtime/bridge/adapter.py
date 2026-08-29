@@ -57,6 +57,8 @@ async def handle_start_run(
     run_manager: RunManager,
     session,
     message: StartRunMessage,
+    *,
+    agent_config: object | None = None,
 ) -> None:
     state = await asyncio.to_thread(
         get_runtime().start_run,
@@ -64,6 +66,7 @@ async def handle_start_run(
         message.task,
         message.page_context,
         connection_id=session.connection_id or "",
+        agent_config=agent_config,
     )
     _v2_run_ids.add(message.run_id)
 

@@ -8,6 +8,11 @@ import {
   type PaymentLinkProposal,
   type BridgeConnectionStatus,
 } from "@/lib/agent/bridge-protocol";
+import {
+  loadAgentSettings,
+  type AgentConfigStatus,
+  settingsToConfigurePayload,
+} from "@/lib/agent/agent-settings";
 import { primeAgentCursor, resetAgentVisual } from "@/lib/agent/agent-visual";
 import { runtimePhaseToUiPhase } from "@/lib/agent/browser-environment";
 
@@ -93,6 +98,7 @@ export function useAgentBridge() {
   const activeRunRef = useRef<AgentRun | null>(null);
   const mountedRef = useRef(true);
   const hasConnectedOnceRef = useRef(false);
+  const [configStatus, setConfigStatus] = useState<AgentConfigStatus | null>(null);
   const [state, setState] = useState<AgentBridgeState>(initialState);
 
   const getClient = useCallback(() => {
@@ -101,6 +107,27 @@ export function useAgentBridge() {
     }
     return client.current;
   }, []);
+
+  const pushAgentConfig = useCallback(
+    (settings = loadAgentSettings()) => {
+      const sdk = getClient();
+      if (!sdk.transport.isConnected()) {
+        return;
+      }
+      sdk.configureAgent(settingsToConfigurePayload(settings));
+    },
+    [getClient],
+  );
+
+  const applyAgentSettings = useCallback(
+    async (settings = loadAgentSettings()) => {
+      if (!getClient().transport.isConnected()) {
+        await getClient().connect();
+      }
+      pushAgentConfig(settings);
+    },
+    [getClient, pushAgentConfig],
+  );
 
   const connect = useCallback(() => {
     void getClient().connect().catch(() => {
@@ -141,7 +168,14 @@ export function useAgentBridge() {
         }));
         if (connected) {
           hasConnectedOnceRef.current = true;
+          pushAgentConfig();
         }
+      }),
+      sdk.on("agent_config_status", (status) => {
+        if (!mountedRef.current) {
+          return;
+        }
+        setConfigStatus(status);
       }),
       sdk.on("agent_chat", ({ text }) => {
         if (!mountedRef.current || !text.trim()) {
@@ -272,7 +306,7 @@ export function useAgentBridge() {
         unsub();
       }
     };
-  }, [connect, getClient]);
+  }, [connect, getClient, pushAgentConfig]);
 
   const startRun = useCallback((task: string, url?: string) => {
     const runId = createRunId();
@@ -399,6 +433,7 @@ export function useAgentBridge() {
 
   return {
     ...state,
+    configStatus,
     connect,
     startRun,
     resumeRun,
@@ -408,5 +443,6 @@ export function useAgentBridge() {
     resetConversation,
     hydrateTimeline,
     getRunTrace,
+    applyAgentSettings,
   };
 }

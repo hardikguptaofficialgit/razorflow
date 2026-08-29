@@ -18,40 +18,31 @@ from agent_runtime.observation.browser_state import BrowserPage, observe_from_pa
 from agent_runtime.planner.llm_provider import LLMProvider, get_default_llm_provider
 from agent_runtime.planner.planner import LLMPlanner
 from agent_runtime.planner.recovery import empty_plan_nudge
+from agent_runtime.domain.registry import resolve_domain_skill
 from agent_runtime.policy.goal_guard import (
     action_advances_goal,
     filter_non_advancing_actions,
     goal_quota_met,
 )
-from agent_runtime.policy.search_state import (
-    entity_visible_on_page,
-    find_goal_ready,
-    needs_search,
-    on_search_page,
-    search_entity,
-)
 from agent_runtime.recovery.loop_detector import (
+    escape_recovery_action,
     loop_nudge,
+    page_fingerprint,
     record_action_hash,
     record_observation,
 )
 from agent_runtime.recovery.stuck import detect_stuck, record_action
-from agent_runtime.target.resolve import refresh_action_target
 from agent_runtime.state.phase import RuntimePhase
 from agent_runtime.state.run_state import RunState
-from agent_runtime.policy.action_gate import (
-    _is_checkout_action,
-    classify_action,
-    filter_forbidden_actions,
-    handoff_allowed,
-)
-from agent_runtime.task.parser import ParsedTask, parse_task_with_spec
+from agent_runtime.policy.action_gate import filter_forbidden_actions
+from agent_runtime.task.parser import parse_task_with_spec
 from agent_runtime.task.phase_progression import try_advance_phase
-from agent_runtime.task.spec import GoalPhase
 from agent_runtime.verifier.action_result import apply_verified_progress, verify_action_result
-from agent_runtime.verifier.checkout_flow import checkout_requires_handoff, is_checkout_flow_page
-from agent_runtime.verifier.goal import approve_completion, is_goal_satisfied, update_milestones
-from agent_runtime.planner.recovery import empty_plan_nudge
+from agent_runtime.verifier.goal import (
+    approve_completion,
+    is_goal_satisfied,
+    update_milestones,
+)
 
 
 TerminalKind = Literal[
@@ -87,17 +78,29 @@ class AgentRuntime:
         page_context: PageContext | None,
         *,
         connection_id: str = "",
+        agent_config: object | None = None,
     ) -> RunState:
         parsed, spec = parse_task_with_spec(task)
+        shopping_enabled: bool | None = None
+        max_agent_steps: int | None = None
+        llm_run_config = None
+        if agent_config is not None:
+            shopping_enabled = getattr(agent_config, "shopping_skill_enabled", None)
+            max_agent_steps = getattr(agent_config, "max_agent_steps", None)
+            if getattr(agent_config, "use_byok", False):
+                llm_run_config = getattr(agent_config, "llm", None)
+
+        skill = resolve_domain_skill(task, shopping_enabled=shopping_enabled)
         memory = TaskMemory(
             goal=parsed.goal,
             items_target=parsed.item_count,
-            remaining_work=_initial_remaining(parsed),
+            remaining_work=skill.initial_remaining_work(parsed),
             remaining_items=list(spec.remaining_items),
         )
-        if parsed.budget_inr is not None:
-            memory.constraints.append(f"budget_inr<={parsed.budget_inr:.0f}")
-        if parsed.prefer_best:
+        budget = spec.metadata.get("budget_inr")
+        if budget is not None:
+            memory.constraints.append(f"budget_inr<={float(budget):.0f}")
+        if spec.metadata.get("prefer_best"):
             memory.constraints.append("prefer_best_match")
 
         state = RunState(
@@ -108,6 +111,12 @@ class AgentRuntime:
             memory=memory,
             connection_id=connection_id,
             current_phase=spec.effective_phases()[0],
+            shopping_skill_enabled=shopping_enabled,
+            max_agent_steps=max_agent_steps,
+            llm_run_config=llm_run_config,
+        )
+        state.bind_skill(
+            resolve_domain_skill(task, shopping_enabled=shopping_enabled),
         )
         if not parsed.actionable:
             state.phase = RuntimePhase.NEEDS_CLARIFICATION
@@ -116,7 +125,10 @@ class AgentRuntime:
             emit_trace(run_id, "TASK_PARSED", step=0, actionable=False)
             return state
 
-        page = observe_from_page_context(page_context)
+        page = observe_from_page_context(
+            page_context,
+            signal_infer=state.skill().infer_page_signals,
+        )
         state.memory.current_page = page
         sync_memory_from_observation(state, page)
         update_milestones(state, page)
@@ -133,7 +145,10 @@ class AgentRuntime:
             return None
         state.waiting_for_user = False
         state.phase = RuntimePhase.OBSERVING
-        page = observe_from_page_context(page_context)
+        page = observe_from_page_context(
+            page_context,
+            signal_infer=state.skill().infer_page_signals,
+        )
         state.memory.current_page = page
         emit_trace(run_id, "RESUME", step=state.step)
         return state
@@ -146,7 +161,10 @@ class AgentRuntime:
 
     def observe(self, state: RunState, page_context: PageContext | None) -> BrowserPage | None:
         state.phase = RuntimePhase.OBSERVING
-        page = observe_from_page_context(page_context)
+        page = observe_from_page_context(
+            page_context,
+            signal_infer=state.skill().infer_page_signals,
+        )
         state.memory.current_page = page
         update_milestones(state, page)
         emit_trace(state.run_id, "OBSERVATION", step=state.step, url=page.url if page else "")
@@ -164,35 +182,26 @@ class AgentRuntime:
                 message=state.needs_clarification_reason,
             )
 
-        page = self.observe(state, page_context)
+        page = observe_from_page_context(
+            page_context,
+            signal_infer=state.skill().infer_page_signals,
+        )
+        state.memory.current_page = page
+        record_observation(state, page)
         try_advance_phase(state, page)
 
         if approve_completion(state, page, source="pre_plan"):
             return _completion_or_handoff(state, page, source="pre_plan")
 
-        if find_goal_ready(state, page) and approve_completion(state, page, source="find_ready"):
+        if state.skill().find_goal_ready(state, page) and approve_completion(
+            state, page, source="find_ready"
+        ):
             return _completion_or_handoff(state, page, source="find_ready")
 
-        spec = state.task_spec
-        if (
-            spec
-            and spec.intent == "add_to_cart"
-            and page
-            and not on_search_page(page)
-            and search_entity(state)
-            and not entity_visible_on_page(page, search_entity(state))
-            and not state.planner_nudge
-        ):
-            state.planner_nudge = (
-                f"Search for '{search_entity(state)}' using the search bar before adding to cart."
-            )
-
-        if needs_search(state, page) and not state.planner_nudge:
-            query = search_entity(state) or "the requested product"
-            state.planner_nudge = (
-                f"Not on search results yet — use search/type for '{query}' in the search bar. "
-                "Do NOT scroll the homepage product grid."
-            )
+        for nudge in state.skill().planner_nudges(state, page):
+            if not state.planner_nudge:
+                state.planner_nudge = nudge
+                break
 
         stuck = detect_stuck(state)
         if stuck:
@@ -205,6 +214,34 @@ class AgentRuntime:
             state.phase = RuntimePhase.RECOVERING
             state.planner_nudge = loop
             emit_trace(state.run_id, "LOOP_DETECTED", step=state.step, reason=loop)
+
+        escape = escape_recovery_action(state)
+        if (
+            escape
+            and not state.pending_actions
+            and state.phase in {RuntimePhase.RECOVERING, RuntimePhase.ACTING}
+        ):
+            state.pending_actions = [escape]
+            state.pending_action_index = 0
+            state.phase = RuntimePhase.RECOVERING
+            emit_trace(
+                state.run_id,
+                "AUTO_ESCAPE",
+                step=state.step,
+                reason=escape.reason,
+            )
+            return self._dispatch_pending(state)
+
+        if state.max_agent_steps is not None and state.step >= state.max_agent_steps:
+            state.phase = RuntimePhase.FAILED
+            return DispatchResult(
+                kind="error",
+                steps=[],
+                message=(
+                    f"Reached the configured step limit ({state.max_agent_steps}). "
+                    "Increase max agent steps in Settings or simplify the task."
+                ),
+            )
 
         if state.consecutive_failures >= 8:
             state.phase = RuntimePhase.FAILED
@@ -271,7 +308,7 @@ class AgentRuntime:
             plan = self._planner.plan(state, page, screenshot_data_url=screenshot)
 
         if plan.propose_handoff:
-            if handoff_allowed(page, plan.handoff_reason or ""):
+            if state.skill().handoff_allowed(page, plan.handoff_reason or ""):
                 state.phase = RuntimePhase.HANDOFF
                 state.waiting_for_user = True
                 reason = plan.handoff_reason or "User input required to continue."
@@ -300,19 +337,11 @@ class AgentRuntime:
                 state.metrics["blocked_action_count"] = int(
                     state.metrics.get("blocked_action_count", 0)
                 ) + len(blocked)
-                if state.current_phase == "checkout":
-                    state.planner_nudge = (
-                        "CURRENT_PHASE=checkout. Cart is ready. "
-                        "Click a checkout-capable control from observation — "
-                        "do NOT add items or use header Sign in. "
-                        "Blocked: " + "; ".join(blocked)
-                    )
-                else:
-                    state.planner_nudge = (
-                        "These actions violate the user goal and were blocked: "
-                        + "; ".join(blocked)
-                        + ". Choose actions that match the declared intent only."
-                    )
+                state.planner_nudge = (
+                    "These actions violate the user goal and were blocked: "
+                    + "; ".join(blocked)
+                    + ". Choose actions that match the declared intent only."
+                )
                 emit_trace(
                     state.run_id,
                     "ACTION_BLOCKED",
@@ -355,7 +384,7 @@ class AgentRuntime:
     def _dispatch_pending(self, state: RunState) -> DispatchResult:
         raw_action = state.pending_actions[state.pending_action_index]
         page = state.memory.current_page
-        action = refresh_action_target(raw_action, page)
+        action = state.skill().refresh_action_target(raw_action, page)
         if action is not raw_action:
             state.pending_actions[state.pending_action_index] = action
             emit_trace(
@@ -502,43 +531,14 @@ class AgentRuntime:
                 "Do not repeat the same target. Re-observe and try another strategy."
             )
 
-        if (
-            ok
-            and _is_checkout_action(action)
-            and state.current_phase in {"checkout", "checkout_reached"}
-        ):
-            state.milestones.add("reached_checkout")
-            if checkout_requires_handoff(page):
-                state.phase = RuntimePhase.HANDOFF
-                state.waiting_for_user = True
-                state.metrics["completion_source"] = "checkout_action_handoff"
-                msg = (
-                    "Sign in to complete checkout. Your cart is saved — "
-                    "finish signing in, then tap Resume."
-                )
-                emit_trace(state.run_id, "CHECKOUT_HANDOFF", step=state.step, source="checkout_action")
-                return DispatchResult(
-                    kind="handoff",
-                    steps=[],
-                    message=msg,
-                    chat_message=msg,
-                    runtime_phase="handoff",
-                )
-            if page and is_checkout_flow_page(page):
-                return _completion_or_handoff(state, page, source="checkout_action")
-            state.planner_nudge = (
-                "Checkout control click did not reach checkout or a login gate. "
-                "Re-observe checkout-capable controls on the cart or current page."
-            )
-            return DispatchResult(kind="continue", steps=[], runtime_phase="observing")
+        handoff = state.skill().post_action_handoff(state, page, action, ok=ok)
+        if handoff is not None:
+            return handoff
 
         if approve_completion(state, page, source="post_action"):
             return _completion_or_handoff(state, page, source="post_action")
 
-        if goal_quota_met(state) and state.parsed_task.goal in {
-            "add_to_cart",
-            "checkout",
-        }:
+        if goal_quota_met(state):
             state.pending_actions = []
             state.pending_action_index = 0
             if approve_completion(state, page, source="quota_met"):
@@ -559,22 +559,10 @@ def _completion_or_handoff(
     *,
     source: str,
 ) -> DispatchResult:
-    if page and checkout_requires_handoff(page):
-        state.phase = RuntimePhase.HANDOFF
-        state.waiting_for_user = True
-        state.metrics["completion_source"] = f"{source}_handoff"
-        msg = (
-            "Sign in to complete checkout. Your cart is saved — "
-            "finish signing in, then tap Resume."
-        )
+    handoff = state.skill().completion_handoff(state, page, source=source)
+    if handoff is not None:
         emit_trace(state.run_id, "CHECKOUT_HANDOFF", step=state.step, source=source)
-        return DispatchResult(
-            kind="handoff",
-            steps=[],
-            message=msg,
-            chat_message=msg,
-            runtime_phase="handoff",
-        )
+        return handoff
     state.phase = RuntimePhase.GOAL_REACHED
     msg = completion_message(state, page) if page else "Task completed."
     return DispatchResult(
@@ -583,22 +571,6 @@ def _completion_or_handoff(
         message=msg,
         chat_message=msg,
     )
-
-
-def _initial_remaining(parsed: ParsedTask) -> list[str]:
-    if parsed.goal == "search":
-        return ["find matching results"]
-    if parsed.goal == "add_to_cart":
-        if parsed.product_hints:
-            return [f"add {hint}" for hint in parsed.product_hints]
-        return [f"add {parsed.item_count} item(s) to cart"]
-    if parsed.goal == "view_cart":
-        return ["open cart page"]
-    if parsed.goal in {"checkout", "purchase"}:
-        return ["reach checkout"]
-    if parsed.goal == "remove":
-        return [f"remove {parsed.remove_target or 'item'} from cart"]
-    return ["complete user request"]
 
 
 def _page_context_from_memory(state: RunState) -> PageContext | None:
@@ -618,12 +590,10 @@ def _record_action_metrics(
     success: bool,
     verified: bool | None,
 ) -> None:
-    categories = classify_action(action)
+    categories = state.skill().classify_action(action)
     spec = state.task_spec
     if spec:
-        from agent_runtime.policy.action_gate import active_forbidden
-
-        forbidden = active_forbidden(spec, state.current_phase)
+        forbidden = state.skill().forbidden_for_phase(state.current_phase, spec)
         for category in categories:
             if category in forbidden:
                 state.metrics["unnecessary_actions"] = int(

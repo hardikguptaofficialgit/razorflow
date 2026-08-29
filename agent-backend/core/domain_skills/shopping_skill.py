@@ -81,8 +81,11 @@ class ShoppingSkill:
 
     def __init__(self):
         self.enabled = True
-        # Configurable URL patterns (can be updated per site)
-        self.url_patterns = _SHOPPING_URL_PATTERNS.copy()
+        self.reset_url_patterns()
+
+    def reset_url_patterns(self) -> None:
+        """Restore default URL patterns (used after per-site customization in tests)."""
+        self.url_patterns = {key: list(paths) for key, paths in _SHOPPING_URL_PATTERNS.items()}
 
     def detect_shopping_task(self, task: str) -> ShoppingSkillOutput:
         """Detect if a task is shopping-related."""
@@ -332,7 +335,8 @@ class ShoppingSkill:
 
     def update_url_patterns(self, patterns: dict[str, list[str]]) -> None:
         """Update URL patterns for site-specific customization."""
-        self.url_patterns.update(patterns)
+        for key, paths in patterns.items():
+            self.url_patterns[key] = list(paths)
 
 
 # Singleton instance

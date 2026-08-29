@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from agent_runtime.observation.browser_state import BrowserPage, format_observation
-from agent_runtime.observation.checkout_controls import format_checkout_controls_section
 from agent_runtime.policy.action_gate import active_forbidden
 from agent_runtime.state.run_state import RunState
 
@@ -34,13 +33,9 @@ def build_planning_context(state: RunState, page: BrowserPage | None) -> str:
             "RECENT FAILED ACTIONS: " + "; ".join(state.memory.failed_actions[-3:])
         )
     if page:
-        checkout_section = format_checkout_controls_section(page)
-        if checkout_section:
-            lines.append(checkout_section)
-        elif phase in {"checkout", "checkout_reached"}:
-            lines.append(
-                "Checkout-capable controls: (none detected yet — inspect links/buttons)"
-            )
+        extra = state.skill().planner_context_extra(state, page)
+        if extra:
+            lines.append(extra)
     return "\n".join(lines)
 
 

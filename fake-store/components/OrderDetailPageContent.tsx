@@ -127,7 +127,7 @@ export function OrderDetailPageContent({ orderId }: OrderDetailPageContentProps)
           {ORDER_STATUS_LABELS[order.status]}
         </span>
         <Link
-          href="/account/orders"
+          href={demoRoutes.accountOrders}
           className="text-sm font-medium text-gray-600 hover:text-gray-900"
         >
           ← All orders

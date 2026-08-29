@@ -59,6 +59,7 @@ class LLMPlanner:
                     SYSTEM_PROMPT,
                     user_prompt,
                     screenshot_data_url=screenshot_data_url,
+                    run_config=state.llm_run_config,
                 )
             schema_result = output
         except Exception as exc:

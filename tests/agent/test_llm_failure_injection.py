@@ -78,7 +78,15 @@ def test_runtime_recovers_from_hallucinated_element_id() -> None:
         def __init__(self) -> None:
             self.calls = 0
 
-        def plan(self, system: str, user: str, *, screenshot_data_url: str | None = None) -> PlannerOutput:
+        def plan(
+            self,
+            system: str,
+            user: str,
+            *,
+            screenshot_data_url: str | None = None,
+            run_config=None,
+            **_: object,
+        ) -> PlannerOutput:
             self.calls += 1
             if self.calls == 1:
                 return PlannerOutput(

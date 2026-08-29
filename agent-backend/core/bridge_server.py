@@ -13,7 +13,19 @@ if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
-from pydantic import TypeAdapter, ValidationError
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel, Field, TypeAdapter, ValidationError
+
+from core.connection_registry import (
+    clear_agent_config,
+    get_agent_config,
+    set_agent_config,
+)
+from core.llm_run_config import (
+    SUPPORTED_PLANNER_PROVIDERS,
+    agent_config_from_wire,
+    agent_config_status_payload,
+)
 
 from core.browser_observer import cleanup_observer_session
 from core.browser_use_runner import BrowserUseRunController
@@ -24,7 +36,9 @@ from core.search_query import sanitize_plan_steps
 from core.task_interpretation import interpret_task
 from core.protocol import (
     ActionResultMessage,
+    AgentConfigStatusMessage,
     CancelRunMessage,
+    ConfigureAgentMessage,
     ConfirmPaymentLinkMessage,
     DeclinePaymentLinkMessage,
     ExtensionMessage,
@@ -77,8 +91,29 @@ from voice.intent_classifier import router as voice_router
 logger = logging.getLogger(__name__)
 
 app = FastAPI(title="RazorFlow Agent Bridge", version="0.2.0")
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:3001",
+        "http://127.0.0.1:3001",
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 app.include_router(voice_router)
 app.include_router(audit_router)
+
+
+class TestLlmRequest(BaseModel):
+    provider: str = Field(min_length=1)
+    api_key: str = Field(min_length=1, alias="apiKey")
+    model: str = Field(min_length=1)
+    temperature: float = Field(default=0.05, ge=0.0, le=1.5)
+
+    model_config = {"populate_by_name": True}
 
 
 def _user_handoff_message(session) -> str:
@@ -163,7 +198,24 @@ def health() -> dict[str, Any]:
         "groqModel": get_groq_model(),
         "cdpAttached": bool(get_browser_use_cdp_url()),
         "paidBrowserUseLlm": False,
+        "byokSupported": True,
+        "supportedPlannerProviders": list(SUPPORTED_PLANNER_PROVIDERS),
     }
+
+
+@app.post("/api/agent/llm/test")
+def test_llm_connection(body: TestLlmRequest) -> dict[str, object]:
+    from core.planner_llm import test_planner_connection
+
+    provider = body.provider.strip().lower()
+    if provider not in SUPPORTED_PLANNER_PROVIDERS:
+        return {"ok": False, "error": f"Unsupported provider: {provider}"}
+    return test_planner_connection(
+        provider=provider,
+        api_key=body.api_key.strip(),
+        model=body.model.strip(),
+        temperature=body.temperature,
+    )
 
 
 async def _send_json(websocket: WebSocket, payload: Any) -> None:
@@ -500,6 +552,46 @@ async def _finish_after_action_result(websocket: WebSocket, session) -> None:
     await _dispatch_next_chunk(websocket, session)
 
 
+async def _handle_configure_agent(
+    websocket: WebSocket,
+    message: ConfigureAgentMessage,
+    *,
+    connection_id: str,
+) -> None:
+    try:
+        config = agent_config_from_wire(message.model_dump(by_alias=True))
+    except ValueError as error:
+        await _send_json(
+            websocket,
+            AgentConfigStatusMessage(
+                type="AGENT_CONFIG_STATUS",
+                mode="server_default",
+                useByok=False,
+                maxAgentSteps=40,
+                shoppingSkillEnabled=True,
+                message=str(error),
+            ).model_dump(by_alias=True, exclude_none=True),
+        )
+        return
+
+    set_agent_config(connection_id, config)
+    status = agent_config_status_payload(config)
+    await _send_json(
+        websocket,
+        AgentConfigStatusMessage(
+            type="AGENT_CONFIG_STATUS",
+            mode=status["mode"],  # type: ignore[arg-type]
+            useByok=status["useByok"],
+            provider=status.get("provider"),
+            model=status.get("model"),
+            temperature=status.get("temperature"),
+            maxAgentSteps=status["maxAgentSteps"],
+            shoppingSkillEnabled=status["shoppingSkillEnabled"],
+            message="Agent configuration saved.",
+        ).model_dump(by_alias=True, exclude_none=True),
+    )
+
+
 async def _handle_start_run(
     websocket: WebSocket,
     message: StartRunMessage,
@@ -525,6 +617,7 @@ async def _handle_start_run(
             run_manager,
             session,
             message,
+            agent_config=get_agent_config(connection_id),
         )
         return
 
@@ -840,11 +933,18 @@ async def websocket_bridge(websocket: WebSocket) -> None:
                 await _handle_confirm_payment_link(websocket, message)
             elif isinstance(message, DeclinePaymentLinkMessage):
                 await _handle_decline_payment_link(websocket, message)
+            elif isinstance(message, ConfigureAgentMessage):
+                await _handle_configure_agent(
+                    websocket,
+                    message,
+                    connection_id=connection_id,
+                )
     except WebSocketDisconnect:
         logger.info(
             "WebSocket client disconnected connectionId=%s — cancelling its active runs",
             connection_id,
         )
+        clear_agent_config(connection_id)
         if not is_agent_runtime_v2_enabled() and is_browser_use_executor_enabled():
             await browser_use_controller.cancel_all_runs()
         for run_id in run_manager.cancel_active_runs(connection_id):

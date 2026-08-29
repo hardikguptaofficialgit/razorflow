@@ -20,6 +20,36 @@ export async function executeActionStep(
     return { success: true, verified: true };
   }
 
+  if (step.action === "wait") {
+    const command = actionStepToContentCommand(step);
+    if (command) {
+      const response = await sendToActiveTab(command);
+      if (!response?.ok) {
+        return {
+          success: false,
+          error: response?.error ?? "Wait failed.",
+        };
+      }
+    }
+    return { success: true, verified: true };
+  }
+
+  if (step.action === "go_back" || step.action === "scroll_page") {
+    const command = actionStepToContentCommand(step);
+    if (!command) {
+      return { success: false, error: "Invalid scroll/back step." };
+    }
+    const response = await sendToActiveTab(command);
+    if (!response?.ok) {
+      return {
+        success: false,
+        code: response?.code ?? "ACTION_FAILED",
+        error: response?.error ?? "Step failed.",
+      };
+    }
+    return { success: true, verified: response.verified ?? true };
+  }
+
   if (step.action === "navigate_url") {
     const command = actionStepToContentCommand(step);
     if (!command) {

@@ -15,6 +15,8 @@ from core.agent_loop import plan_next_action  # noqa: E402
 from core.protocol import PageContext  # noqa: E402
 from core.run_manager import RunSession  # noqa: E402
 
+pytestmark = pytest.mark.legacy
+
 
 @pytest.mark.asyncio
 async def test_search_results_without_progress_still_plans() -> None:

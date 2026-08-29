@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 
 from agent_runtime.executor.actions import AgentAction, ElementTarget
-from agent_runtime.observation.browser_state import BrowserPage, ObservedElement, ObservedProduct
+from agent_runtime.observation.browser_state import BrowserPage, ObservedElement
 
 _ELEMENT_ID_RE = re.compile(r"^e(\d+)$", re.I)
 _TOKEN_RE = re.compile(r"[a-z0-9]+", re.I)
@@ -61,22 +61,6 @@ def _find_element_by_text(
     return best if best_score >= 0.5 else None
 
 
-def _find_product_add_button(
-    page: BrowserPage,
-    needle: str,
-) -> tuple[str | None, str | None]:
-    best_product: ObservedProduct | None = None
-    best_score = 0.0
-    for product in page.products:
-        score = _score_text(needle, product.title)
-        if score > best_score:
-            best_score = score
-            best_product = product
-    if best_product and best_score >= 0.4 and best_product.add_element_id:
-        return best_product.add_element_id, best_product.title
-    return None, None
-
-
 def _element_still_valid(page: BrowserPage, element_id: str | None, needle: str) -> bool:
     if not element_id:
         return False
@@ -108,20 +92,6 @@ def refresh_action_target(action: AgentAction, page: BrowserPage | None) -> Agen
 
     resolved_id: str | None = None
     resolved_text = needle
-
-    if action.type == "click" and needle:
-        lower = needle.lower()
-        if "add" in lower and "cart" in lower:
-            product_needle = (
-                lower.replace("add to cart for ", "")
-                .replace("add to cart", "")
-                .strip()
-            )
-            add_id, title = _find_product_add_button(page, product_needle or needle)
-            if add_id:
-                resolved_id = add_id
-                if title:
-                    resolved_text = f"Add to cart for {title}"
 
     if resolved_id is None and needle:
         el = _find_element_by_text(

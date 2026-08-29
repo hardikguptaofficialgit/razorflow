@@ -24,6 +24,8 @@ class ObservedElement:
     enabled: bool = True
     clickable: bool = False
     typeable: bool = False
+    bbox_y: int | None = None
+    bbox_height: int | None = None
 
 
 @dataclass
@@ -79,11 +81,14 @@ def _parse_search_query(url: str) -> str:
     return values[0] if values else ""
 
 
-from agent_runtime.observation.cart_state import header_cart_item_count
-from agent_runtime.observation.signals import infer_page_signals
+from agent_runtime.observation.signals import infer_generic_page_signals
 
 
-def observe_from_page_context(page: PageContext | None) -> BrowserPage | None:
+def observe_from_page_context(
+    page: PageContext | None,
+    *,
+    signal_infer=None,
+) -> BrowserPage | None:
     if page is None:
         return None
 
@@ -100,7 +105,8 @@ def observe_from_page_context(page: PageContext | None) -> BrowserPage | None:
         href = (getattr(el, "href", "") or "")[:200]
         value = (getattr(el, "value", "") or "")[:80]
         enabled = getattr(el, "enabled", True)
-        bbox_x = getattr(el, "bbox_x", None)
+        bbox_y = getattr(el, "bbox_y", None)
+        bbox_height = getattr(el, "bbox_height", None)
         elements.append(
             ObservedElement(
                 element_id=_element_id(idx),
@@ -116,6 +122,8 @@ def observe_from_page_context(page: PageContext | None) -> BrowserPage | None:
                 enabled=enabled,
                 clickable=clickable,
                 typeable=typeable,
+                bbox_y=bbox_y,
+                bbox_height=bbox_height,
             )
         )
 
@@ -153,13 +161,11 @@ def observe_from_page_context(page: PageContext | None) -> BrowserPage | None:
         for line in page.cart_lines
     ]
 
-    header_cart = header_cart_item_count(page)
-    if not cart_lines and header_cart > 0:
-        cart_lines = [
-            ObservedCartLine(title="(header cart badge)", quantity=header_cart)
-        ]
-
     path = urlparse(page.url).path if page.url else ""
+    if signal_infer is not None:
+        signals = signal_infer(page)
+    else:
+        signals = infer_generic_page_signals(page)
     return BrowserPage(
         title=page.title or "",
         url=page.url or "",
@@ -168,7 +174,7 @@ def observe_from_page_context(page: PageContext | None) -> BrowserPage | None:
         elements=elements,
         products=products,
         cart_lines=cart_lines,
-        signals=infer_page_signals(page),
+        signals=signals,
     )
 
 
@@ -185,6 +191,16 @@ def format_observation(page: BrowserPage | None, *, max_elements: int = 60) -> s
         lines.append(f"SearchQuery: {page.search_query}")
     if page.signals:
         lines.append(f"Signals: {', '.join(page.signals)}")
+
+    below_fold = sum(
+        1
+        for el in page.elements
+        if el.bbox_y is not None and el.bbox_y > 900
+    )
+    if below_fold:
+        lines.append(
+            f"Layout: {below_fold} interactive elements appear below the fold — scroll if targets are missing."
+        )
 
     if page.products:
         lines.append("\nProducts:")

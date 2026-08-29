@@ -15,6 +15,7 @@ import type { useAgentVoice } from "@/lib/voice/useAgentVoice";
 import { formatPrice } from "@/lib/format";
 import { StoreLogo } from "@/components/StoreLogo";
 import type { useAgentBridge } from "@/lib/agent/useAgentBridge";
+import { formatConfigStatus } from "@/lib/agent/agent-settings";
 
 type Bridge = ReturnType<typeof useAgentBridge>;
 type Voice = ReturnType<typeof useAgentVoice>;
@@ -29,6 +30,7 @@ interface AgentPanelProps {
   task: string;
   onTaskChange: (value: string) => void;
   onClose: () => void;
+  onOpenSettings: () => void;
   onToggleSessions: () => void;
   onCreateSession: () => void;
   onSwitchSession: (sessionId: string) => void;
@@ -200,6 +202,7 @@ export function AgentPanel({
   task,
   onTaskChange,
   onClose,
+  onOpenSettings,
   onToggleSessions,
   onCreateSession,
   onSwitchSession,
@@ -258,12 +261,37 @@ export function AgentPanel({
                 aria-hidden
               />
               {phase}
+              {connected
+                ? ` · ${formatConfigStatus(bridge.configStatus, connected)}`
+                : ""}
               {busy && bridge.actionSummary ? ` · ${bridge.actionSummary}` : ""}
             </p>
           </div>
         </div>
 
         <div className="rf-agent-panel__actions">
+          <button
+            type="button"
+            className="rf-agent-icon-btn"
+            aria-label="Settings"
+            title="Agent settings"
+            onClick={onOpenSettings}
+            data-rf-interactive
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden>
+              <path
+                d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z"
+                stroke="currentColor"
+                strokeWidth="1.8"
+              />
+              <path
+                d="M19.4 13a7.8 7.8 0 0 0 .1-2l2-1.5-2-3.5-2.3.7a8 8 0 0 0-1.7-1L15 3h-6l-.5 2.7a8 8 0 0 0-1.7 1L4.5 6 2.5 9.5l2 1.5a7.8 7.8 0 0 0 0 2l-2 1.5 2 3.5 2.3-.7a8 8 0 0 0 1.7 1L9 21h6l.5-2.7a8 8 0 0 0 1.7-1l2.3.7 2-3.5-2-1.5Z"
+                stroke="currentColor"
+                strokeWidth="1.2"
+                strokeLinejoin="round"
+              />
+            </svg>
+          </button>
           <button
             type="button"
             className="rf-agent-icon-btn"

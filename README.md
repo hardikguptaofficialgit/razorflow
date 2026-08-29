@@ -106,9 +106,12 @@ Load **`extension/dist/`** as an unpacked extension in `chrome://extensions`.
 |------|-------------|
 | `extension/` | Chrome MV3 agent UI and executor |
 | `agent-backend/` | FastAPI bridge, Groq planner, policy, MCP |
+| `agent_runtime/` | **V2 supported runtime** (domain skills) |
 | `fake-store/` | Demo e-commerce site |
+| `packages/` | Published SDK (`razorflow-protocol` → `browser` → `client`) |
 | `docs/` | Architecture and diagrams |
-| `tests/` | Policy and voice intent tests |
+
+**Runtime:** V2 (`agent_runtime/`) is the supported path. V1 (`core/agent_loop.py`) is legacy — see [docs/RUNTIME.md](./docs/RUNTIME.md).
 
 Contributor rules: [AGENTS.md](./AGENTS.md)
 

@@ -27,6 +27,7 @@ from core.run_manager import RunManager, RunSession  # noqa: E402
 from core.task_interpretation import interpret_task  # noqa: E402
 
 
+@pytest.mark.legacy
 def test_wdwd_needs_clarification() -> None:
     interpretation = interpret_task("wdwd")
     assert interpretation.status == "needs_clarification"

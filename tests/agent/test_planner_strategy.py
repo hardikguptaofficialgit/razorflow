@@ -21,6 +21,8 @@ from core.protocol import (  # noqa: E402
 )
 from core.run_manager import RunSession  # noqa: E402
 
+pytestmark = pytest.mark.legacy
+
 
 @pytest.mark.asyncio
 async def test_dom_agent_uses_llm_when_goal_not_met() -> None:

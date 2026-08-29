@@ -77,6 +77,21 @@ function isActionStep(step: unknown): step is ActionStep {
       );
     case "navigate_url":
       return typeof payload.url === "string" && payload.url.trim().length > 0;
+    case "scroll_page":
+      return (
+        payload.direction === undefined ||
+        payload.direction === "up" ||
+        payload.direction === "down" ||
+        payload.direction === "top" ||
+        payload.direction === "bottom"
+      );
+    case "wait":
+      return (
+        payload.durationMs === undefined ||
+        (typeof payload.durationMs === "number" && payload.durationMs >= 0)
+      );
+    case "go_back":
+      return true;
     case "wait_for_user":
       return true;
     case "ready_for_payment_link":
@@ -168,6 +183,15 @@ export function actionStepToContentCommand(
       };
     case "navigate_url":
       return { type: "NAVIGATE_URL", url: step.url };
+    case "scroll_page": {
+      const direction = step.direction ?? "down";
+      const amountPx = step.amountPx ?? 600;
+      return { type: "SCROLL_PAGE", direction, amountPx };
+    }
+    case "wait":
+      return { type: "WAIT", durationMs: step.durationMs ?? 300 };
+    case "go_back":
+      return { type: "GO_BACK" };
     case "wait_for_user":
       return { type: "SET_STATE", state: "waiting_for_user" };
     case "ready_for_payment_link":

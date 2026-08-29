@@ -1,9 +1,4 @@
-export interface PaymentLinkProposal {
-  title: string;
-  description: string;
-  amountPaise: number;
-  currency: string;
-}
+export type { PaymentLinkProposal } from "@hardik21232323/razorflow-protocol";
 
 export interface PaymentLinkResult {
   paymentLinkUrl: string;

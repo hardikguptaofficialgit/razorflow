@@ -20,7 +20,15 @@ class _FakeLLM:
         self._outputs = outputs
         self._index = 0
 
-    def plan(self, system: str, user: str, *, screenshot_data_url: str | None = None) -> PlannerOutput:
+    def plan(
+        self,
+        system: str,
+        user: str,
+        *,
+        screenshot_data_url: str | None = None,
+        run_config=None,
+        **_: object,
+    ) -> PlannerOutput:
         output = self._outputs[min(self._index, len(self._outputs) - 1)]
         self._index += 1
         return output

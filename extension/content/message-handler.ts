@@ -96,6 +96,25 @@ async function runContentCommand(
         };
       }
     }
+    case "SCROLL_PAGE": {
+      const amount = command.amountPx ?? 600;
+      if (command.direction === "top") {
+        window.scrollTo(0, 0);
+      } else if (command.direction === "bottom") {
+        window.scrollTo(0, document.documentElement.scrollHeight);
+      } else if (command.direction === "up") {
+        window.scrollBy(0, -amount);
+      } else {
+        window.scrollBy(0, amount);
+      }
+      return { ok: true, verified: true };
+    }
+    case "WAIT":
+      await new Promise((resolve) => setTimeout(resolve, command.durationMs ?? 300));
+      return { ok: true, verified: true };
+    case "GO_BACK":
+      window.history.back();
+      return { ok: true, verified: true };
     case "RUN_DEMO_FLOW": {
       const outcome = await actionPlayer.runDemoFlow(command.text ?? "shampoo");
       return {

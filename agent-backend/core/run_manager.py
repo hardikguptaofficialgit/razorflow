@@ -54,6 +54,7 @@ class RunSession:
     consecutive_failures: int = 0
     stale_page_turns: int = 0
     stale_recovery_used: bool = False
+    auto_recovery_count: int = 0
     last_page_fingerprint: str | None = None
     last_dispatched_steps: list[ActionStep] = field(default_factory=list)
     waiting_for_user: bool = False

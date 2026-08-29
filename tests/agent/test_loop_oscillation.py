@@ -67,3 +67,18 @@ def test_oscillation_ab_detected() -> None:
     msg = detect_stuck(state)
     assert msg is not None
     assert "oscillat" in msg.lower()
+
+
+def test_escape_recovery_scroll_on_stagnant_pages() -> None:
+    from agent_runtime.recovery.loop_detector import escape_recovery_action, record_observation
+    from agent_runtime.observation.browser_state import BrowserPage
+
+    state = _state()
+    page = BrowserPage(title="t", url="http://example.com", path="/", search_query="")
+    for _ in range(5):
+        record_observation(state, page)
+    escape = escape_recovery_action(state)
+    assert escape is not None
+    assert escape.type == "scroll"
+    assert escape_recovery_action(state) is not None
+    assert escape_recovery_action(state) is None

@@ -2261,3 +2261,229 @@ body {
   }
 }
 
+/* Agent BYOK settings modal */
+.rf-settings {
+  position: fixed;
+  inset: 0;
+  z-index: 10050;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background: rgba(8, 10, 18, 0.55);
+  backdrop-filter: blur(6px);
+}
+
+.rf-settings__dialog {
+  width: min(520px, 100%);
+  max-height: min(90vh, 760px);
+  overflow: auto;
+  border-radius: 18px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: linear-gradient(180deg, #151821 0%, #10131b 100%);
+  color: #f4f6fb;
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.45);
+}
+
+.rf-settings__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 20px 20px 12px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.rf-settings__header h2 {
+  margin: 0;
+  font-size: 1.1rem;
+  font-weight: 600;
+}
+
+.rf-settings__subtitle {
+  margin: 6px 0 0;
+  color: rgba(244, 246, 251, 0.68);
+  font-size: 0.86rem;
+  line-height: 1.45;
+}
+
+.rf-settings__close {
+  border: 0;
+  background: transparent;
+  color: rgba(244, 246, 251, 0.72);
+  font-size: 1.5rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.rf-settings__status {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  margin: 0 20px 12px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.rf-settings__status-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  background: #ef4444;
+  flex-shrink: 0;
+}
+
+.rf-settings__status-dot--on {
+  background: #22c55e;
+}
+
+.rf-settings__status-label {
+  margin: 0;
+  font-size: 0.88rem;
+  font-weight: 600;
+}
+
+.rf-settings__status-meta {
+  margin: 2px 0 0;
+  font-size: 0.8rem;
+  color: rgba(244, 246, 251, 0.62);
+}
+
+.rf-settings__form {
+  padding: 0 20px 20px;
+}
+
+.rf-settings__section + .rf-settings__section {
+  margin-top: 18px;
+  padding-top: 18px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.rf-settings__section h3 {
+  margin: 0 0 12px;
+  font-size: 0.78rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgba(244, 246, 251, 0.55);
+}
+
+.rf-settings__field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 12px;
+  font-size: 0.86rem;
+}
+
+.rf-settings__field span {
+  color: rgba(244, 246, 251, 0.78);
+}
+
+.rf-settings__field input,
+.rf-settings__field select {
+  width: 100%;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(0, 0, 0, 0.25);
+  color: #f4f6fb;
+  padding: 10px 12px;
+  font: inherit;
+}
+
+.rf-settings__field input:focus,
+.rf-settings__field select:focus {
+  outline: 2px solid rgba(99, 102, 241, 0.45);
+  border-color: rgba(99, 102, 241, 0.65);
+}
+
+.rf-settings__secret {
+  display: flex;
+  gap: 8px;
+}
+
+.rf-settings__secret input {
+  flex: 1;
+}
+
+.rf-settings__toggle {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+  font-size: 0.88rem;
+}
+
+.rf-settings__error,
+.rf-settings__notice {
+  margin: 12px 0 0;
+  padding: 10px 12px;
+  border-radius: 10px;
+  font-size: 0.84rem;
+}
+
+.rf-settings__error {
+  background: rgba(239, 68, 68, 0.12);
+  color: #fecaca;
+}
+
+.rf-settings__notice {
+  background: rgba(34, 197, 94, 0.12);
+  color: #bbf7d0;
+}
+
+.rf-settings__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+  margin-top: 18px;
+}
+
+.rf-settings__primary,
+.rf-settings__secondary,
+.rf-settings__ghost {
+  border-radius: 10px;
+  padding: 10px 14px;
+  font: inherit;
+  cursor: pointer;
+}
+
+.rf-settings__primary {
+  border: 0;
+  background: #6366f1;
+  color: white;
+}
+
+.rf-settings__secondary {
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.04);
+  color: #f4f6fb;
+}
+
+.rf-settings__ghost {
+  border: 0;
+  background: transparent;
+  color: rgba(244, 246, 251, 0.72);
+}
+
+.rf-settings__primary:disabled,
+.rf-settings__secondary:disabled,
+.rf-settings__ghost:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+@media (max-width: 560px) {
+  .rf-settings {
+    align-items: flex-end;
+    padding: 0;
+  }
+
+  .rf-settings__dialog {
+    width: 100%;
+    max-height: 92vh;
+    border-radius: 18px 18px 0 0;
+  }
+}
+

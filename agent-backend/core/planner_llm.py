@@ -297,7 +297,11 @@ def _openrouter_complete_with_key(
     system_prompt: str,
     user_prompt: str,
     screenshot_data_url: str | None = None,
+    *,
+    model: str | None = None,
+    temperature: float = 0.05,
 ) -> str:
+    resolved_model = model or get_openrouter_model()
     user_content: str | list[dict]
     if screenshot_data_url and is_planner_screenshot_enabled():
         user_content = [
@@ -310,8 +314,8 @@ def _openrouter_complete_with_key(
     return _http_json_complete(
         url=OPENROUTER_API_URL,
         body={
-            "model": get_openrouter_model(),
-            "temperature": 0.05,
+            "model": resolved_model,
+            "temperature": temperature,
             "response_format": {"type": "json_object"},
             "messages": [
                 {"role": "system", "content": system_prompt},
@@ -325,7 +329,7 @@ def _openrouter_complete_with_key(
         },
         provider="OpenRouter",
         extract_text=_openrouter_extract_text,
-        model=get_openrouter_model(),
+        model=resolved_model,
         max_attempts=2,
     )
 
@@ -422,16 +426,17 @@ def _groq_complete_with_key(
     api_key: str,
     system_prompt: str,
     user_prompt: str,
+    *,
+    model: str | None = None,
+    temperature: float = 0.05,
 ) -> str:
-    model = get_groq_model()
+    resolved_model = model or get_groq_model()
 
     def request() -> str:
-        # max_retries=0 keeps the SDK from sleeping out a Retry-After invisibly; the shared
-        # budget decides whether to wait or let the caller rotate keys and fall back.
         client = Groq(api_key=api_key, timeout=_HTTP_TIMEOUT_SEC, max_retries=0)
         response = client.chat.completions.create(
-            model=model,
-            temperature=0.05,
+            model=resolved_model,
+            temperature=temperature,
             response_format={"type": "json_object"},
             messages=[
                 {"role": "system", "content": system_prompt},
@@ -443,7 +448,7 @@ def _groq_complete_with_key(
             raise ValueError("Groq returned empty planner output.")
         return raw_content
 
-    return call_with_resilience(request, provider="Groq", model=model)[0]
+    return call_with_resilience(request, provider="Groq", model=resolved_model)[0]
 
 
 def _groq_complete(system_prompt: str, user_prompt: str) -> str:
@@ -514,7 +519,22 @@ def complete_planner_json(
     system_prompt: str,
     user_prompt: str,
     screenshot_data_url: str | None = None,
+    *,
+    run_config: "LlmByokConfig | None" = None,
 ) -> str:
+    if run_config is not None:
+        logger.info(
+            "Planner LLM BYOK provider=%s model=%s",
+            run_config.provider,
+            run_config.model,
+        )
+        return complete_planner_json_byok(
+            run_config,
+            system_prompt,
+            user_prompt,
+            screenshot_data_url=screenshot_data_url,
+        )
+
     chain = get_planner_llm_fallback_chain()
     configured = [provider for provider in chain if _is_provider_configured(provider)]
     if not configured:
@@ -554,3 +574,165 @@ def complete_planner_json(
     raise PlannerLlmError(
         str(last_error or "All planner LLM providers in the fallback chain failed."),
     )
+
+
+def _gemini_complete_with_key(
+    api_key: str,
+    system_prompt: str,
+    user_prompt: str,
+    *,
+    model: str | None = None,
+    temperature: float = 0.05,
+    screenshot_data_url: str | None = None,
+) -> str:
+    resolved_model = model or get_gemini_model()
+    url = f"{GEMINI_API_BASE}/{resolved_model}:generateContent?key={api_key}"
+
+    user_parts: list[dict] = [{"text": user_prompt}]
+    if screenshot_data_url and is_planner_screenshot_enabled():
+        mime, payload = _parse_data_url(screenshot_data_url)
+        user_parts.append({"inline_data": {"mime_type": mime, "data": payload}})
+
+    def extract_text(payload: dict) -> str:
+        candidates = payload.get("candidates") or []
+        if not candidates:
+            raise ValueError("Gemini returned no candidates.")
+        parts = candidates[0].get("content", {}).get("parts") or []
+        return "".join(part.get("text", "") for part in parts if isinstance(part, dict))
+
+    return _http_json_complete(
+        url=url,
+        body={
+            "systemInstruction": {"parts": [{"text": system_prompt}]},
+            "contents": [{"role": "user", "parts": user_parts}],
+            "generationConfig": {
+                "temperature": temperature,
+                "responseMimeType": "application/json",
+            },
+        },
+        headers={"Content-Type": "application/json"},
+        provider="Gemini",
+        extract_text=extract_text,
+        model=resolved_model,
+        max_attempts=2,
+    )
+
+
+def _vercel_gateway_complete_with_key(
+    api_key: str,
+    system_prompt: str,
+    user_prompt: str,
+    screenshot_data_url: str | None = None,
+    *,
+    model: str | None = None,
+    temperature: float = 0.05,
+) -> str:
+    resolved_model = model or get_vercel_ai_gateway_model()
+    user_content: str | list[dict]
+    if screenshot_data_url and is_planner_screenshot_enabled():
+        user_content = [
+            {"type": "text", "text": user_prompt},
+            {"type": "image_url", "image_url": {"url": screenshot_data_url}},
+        ]
+    else:
+        user_content = user_prompt
+
+    return _http_json_complete(
+        url=VERCEL_AI_GATEWAY_API_URL,
+        body={
+            "model": resolved_model,
+            "temperature": temperature,
+            "response_format": {"type": "json_object"},
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_content},
+            ],
+        },
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        },
+        provider="VercelAIGateway",
+        extract_text=_openrouter_extract_text,
+        model=resolved_model,
+        max_attempts=2,
+    )
+
+
+def complete_planner_json_byok(
+    config: "LlmByokConfig",
+    system_prompt: str,
+    user_prompt: str,
+    *,
+    screenshot_data_url: str | None = None,
+) -> str:
+    from core.llm_run_config import LlmByokConfig
+
+    if config.provider == "groq":
+        if screenshot_data_url:
+            logger.info("Planner BYOK screenshot skipped for groq (text-only)")
+        return _groq_complete_with_key(
+            config.api_key,
+            system_prompt,
+            user_prompt,
+            model=config.model,
+            temperature=config.temperature,
+        )
+    if config.provider == "openrouter":
+        return _openrouter_complete_with_key(
+            config.api_key,
+            system_prompt,
+            user_prompt,
+            screenshot_data_url,
+            model=config.model,
+            temperature=config.temperature,
+        )
+    if config.provider == "vercel_ai_gateway":
+        return _vercel_gateway_complete_with_key(
+            config.api_key,
+            system_prompt,
+            user_prompt,
+            screenshot_data_url,
+            model=config.model,
+            temperature=config.temperature,
+        )
+    if config.provider == "gemini":
+        return _gemini_complete_with_key(
+            config.api_key,
+            system_prompt,
+            user_prompt,
+            model=config.model,
+            temperature=config.temperature,
+            screenshot_data_url=screenshot_data_url,
+        )
+    raise PlannerConfigurationError(f"Unknown BYOK provider: {config.provider}")
+
+
+def test_planner_connection(
+    *,
+    provider: str,
+    api_key: str,
+    model: str,
+    temperature: float = 0.05,
+) -> dict[str, object]:
+    """Validate a BYOK credential with a minimal completion request."""
+    from core.llm_run_config import LlmByokConfig, sanitize_provider_error
+
+    config = LlmByokConfig(
+        provider=provider,  # type: ignore[arg-type]
+        api_key=api_key,
+        model=model,
+        temperature=temperature,
+    )
+    try:
+        complete_planner_json_byok(
+            config,
+            "You are a connection test assistant.",
+            'Reply with JSON only: {"ok": true}',
+        )
+        return {"ok": True, "provider": provider, "model": model}
+    except Exception as error:
+        return {
+            "ok": False,
+            "error": sanitize_provider_error(error, api_key),
+        }

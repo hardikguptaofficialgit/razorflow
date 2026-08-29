@@ -585,6 +585,24 @@ export async function executeActionStep(
       clearAgentHighlight();
       result = { success: true, verified: true };
     }
+  } else if (step.action === "scroll_page") {
+    const amount = step.amountPx ?? 600;
+    if (step.direction === "top") {
+      window.scrollTo(0, 0);
+    } else if (step.direction === "bottom") {
+      window.scrollTo(0, document.documentElement.scrollHeight);
+    } else if (step.direction === "up") {
+      window.scrollBy(0, -amount);
+    } else {
+      window.scrollBy(0, amount);
+    }
+    result = { success: true, verified: true };
+  } else if (step.action === "wait") {
+    await sleep(step.durationMs ?? 300);
+    result = { success: true, verified: true };
+  } else if (step.action === "go_back") {
+    window.history.back();
+    result = { success: true, verified: true };
   } else {
     clearAgentHighlight();
     result = { success: false, error: `Unsupported action: ${(step as ActionStep).action}` };

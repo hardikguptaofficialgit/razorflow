@@ -26,6 +26,13 @@ export type ActionStep =
       matchText?: string;
     }
   | { action: "navigate_url"; url: string }
+  | {
+      action: "scroll_page";
+      direction?: "up" | "down" | "top" | "bottom";
+      amountPx?: number;
+    }
+  | { action: "wait"; durationMs?: number }
+  | { action: "go_back" }
   | { action: "wait_for_user" }
   | {
       action: "ready_for_payment_link";
@@ -59,7 +66,17 @@ export type ClientToServerMessage =
     }
   | { type: "CANCEL_RUN"; runId: string }
   | { type: "CONFIRM_PAYMENT_LINK"; runId: string; confirmed: boolean }
-  | { type: "DECLINE_PAYMENT_LINK"; runId: string };
+  | { type: "DECLINE_PAYMENT_LINK"; runId: string }
+  | {
+      type: "CONFIGURE_AGENT";
+      useByok: boolean;
+      provider?: string;
+      apiKey?: string;
+      model?: string;
+      temperature?: number;
+      maxAgentSteps?: number;
+      shoppingSkillEnabled?: boolean;
+    };
 
 export type ServerToClientMessage =
   | { type: "EXECUTOR_MODE"; runId: string; mode: "extension_dom" | "browser_use" }
@@ -93,16 +110,28 @@ export type ServerToClientMessage =
       description: string;
       message?: string;
     }
-  | { type: "PAYMENT_LINK_FAILED"; runId: string; message: string }
+  | { type: "PAYMENT_LINK_FAILED"; runId: string; message: string; recoverable?: boolean }
   | {
       type: "AGENT_SYNC";
       runId: string;
       phase: string;
       actionSummary: string;
+      title?: string;
       url: string;
       step: number;
       cursor?: { x: number; y: number };
       highlight?: { x: number; y: number; width: number; height: number };
+    }
+  | {
+      type: "AGENT_CONFIG_STATUS";
+      mode: "server_default" | "byok";
+      useByok: boolean;
+      provider?: string;
+      model?: string;
+      temperature?: number;
+      maxAgentSteps: number;
+      shoppingSkillEnabled: boolean;
+      message?: string;
     };
 
 export interface PaymentLinkProposal {

@@ -11,7 +11,7 @@ from core.agent_phase import AgentPhase
 from core.config import config
 from core.execution_log import log_intent, log_observe, log_plan, log_run
 from core.generic_page_analyzer import get_generic_page_analyzer
-from core.generic_recovery import get_generic_recovery, RecoveryAction
+from core.generic_recovery import get_generic_recovery, RecoveryAction, recovery_to_planner_chunk
 from core.goal_verifier import approve_completion
 from core.plan_guard_store import apply_store_dom_guard
 from core.planner import plan_with_llm
@@ -109,6 +109,28 @@ async def plan_next_action(session: RunSession) -> PlannerChunkOutput:
         set_phase(session, "goal_reached")
         return PlannerChunkOutput(steps=[], terminal="system_complete")
 
+    # Deterministic scroll/back recovery before LLM when page is stagnant
+    if (
+        config.enable_goal_verification
+        and page
+        and session.auto_recovery_count < 2
+        and session.stale_page_turns >= 2
+    ):
+        recovery = get_generic_recovery()
+        stuck_action = recovery._analyze_stuck_state(session, page)
+        if stuck_action:
+            chunk = recovery_to_planner_chunk(stuck_action, session)
+            if chunk and chunk.steps:
+                set_phase(session, "executing")
+                log_plan(
+                    session.run_id,
+                    session.action_step + 1,
+                    "auto_recovery",
+                    steps=len(chunk.steps),
+                    terminal=chunk.terminal,
+                )
+                return chunk
+
     # Generic recovery check (works for any task)
     if config.enable_goal_verification:
         recovery = get_generic_recovery()
@@ -177,12 +199,24 @@ async def plan_next_action(session: RunSession) -> PlannerChunkOutput:
             if config.enable_goal_verification:
                 recovery = get_generic_recovery()
                 recovery_action = recovery.analyze_failure(session)
-                if recovery_action and recovery_action.action_type == "handoff":
-                    set_phase(session, "handoff")
-                    return PlannerChunkOutput(
-                        steps=[WaitForUserStep(action="wait_for_user")],
-                        terminal="wait_for_user",
-                    )
+                if recovery_action:
+                    if recovery_action.action_type == "handoff":
+                        set_phase(session, "handoff")
+                        return PlannerChunkOutput(
+                            steps=[WaitForUserStep(action="wait_for_user")],
+                            terminal="wait_for_user",
+                        )
+                    chunk = recovery_to_planner_chunk(recovery_action, session)
+                    if chunk and chunk.steps:
+                        set_phase(session, "executing")
+                        log_plan(
+                            session.run_id,
+                            session.action_step + 1,
+                            "recovery",
+                            steps=len(chunk.steps),
+                            terminal=chunk.terminal,
+                        )
+                        return chunk
 
         if validated.terminal == "system_complete":
             set_phase(session, "goal_reached")

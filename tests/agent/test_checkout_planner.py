@@ -27,7 +27,15 @@ class _FakeLLM:
         self._index = 0
         self.prompts: list[str] = []
 
-    def plan(self, system: str, user: str, *, screenshot_data_url: str | None = None) -> PlannerOutput:
+    def plan(
+        self,
+        system: str,
+        user: str,
+        *,
+        screenshot_data_url: str | None = None,
+        run_config=None,
+        **_: object,
+    ) -> PlannerOutput:
         self.prompts.append(user)
         output = self._outputs[min(self._index, len(self._outputs) - 1)]
         self._index += 1

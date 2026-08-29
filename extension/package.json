@@ -12,6 +12,7 @@
     "typescript": "^5.8.2"
   },
   "dependencies": {
+    "@hardik21232323/razorflow-protocol": "file:../packages/razorflow-protocol",
     "@moonshine-ai/moonshine-js": "^0.1.29"
   }
 }

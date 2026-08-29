@@ -20,6 +20,12 @@ const LEGACY_STORE_PREFIXES = [
 export async function middleware(request: NextRequest) {
   const path = request.nextUrl.pathname;
 
+  if (path === "/profile" || path.startsWith("/profile/")) {
+    const redirectUrl = request.nextUrl.clone();
+    redirectUrl.pathname = demoPath("/account");
+    return NextResponse.redirect(redirectUrl);
+  }
+
   for (const prefix of LEGACY_STORE_PREFIXES) {
     if (path === prefix || path.startsWith(`${prefix}/`)) {
       const redirectUrl = request.nextUrl.clone();

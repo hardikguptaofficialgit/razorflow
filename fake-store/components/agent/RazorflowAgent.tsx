@@ -7,6 +7,7 @@ import { resetAgentVisual } from "@/lib/agent/agent-visual";
 import { isBusy } from "@/lib/agent/agent-ui-utils";
 import { useAgentVoice } from "@/lib/voice/useAgentVoice";
 import { AgentLauncher, AgentPanel } from "@/components/agent/AgentPanel";
+import { AgentSettingsModal } from "@/components/agent/AgentSettingsModal";
 import { AgentVisualOverlay } from "@/components/agent/AgentVisualOverlay";
 
 function mapOverlayPhase(
@@ -41,6 +42,7 @@ export function RazorflowAgent() {
   const sessions = useAgentSessions(bridge);
   const [open, setOpen] = useState(false);
   const [showSessions, setShowSessions] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [task, setTask] = useState("");
 
   const connected = bridge.status === "connected";
@@ -152,12 +154,23 @@ export function RazorflowAgent() {
             task={task}
             onTaskChange={setTask}
             onClose={() => setOpen(false)}
+            onOpenSettings={() => setSettingsOpen(true)}
             onToggleSessions={() => setShowSessions((value) => !value)}
             onCreateSession={handleCreateSession}
             onSwitchSession={handleSwitchSession}
             onSubmitTask={handleSubmitTask}
           />
         )}
+
+        <AgentSettingsModal
+          open={settingsOpen}
+          connected={connected}
+          configStatus={bridge.configStatus}
+          onClose={() => setSettingsOpen(false)}
+          onApply={async (settings) => {
+            await bridge.applyAgentSettings(settings);
+          }}
+        />
 
         <AgentLauncher
           open={open}

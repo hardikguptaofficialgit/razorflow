@@ -64,4 +64,8 @@ tests/agent/real_ui_results.json
 tests/agent/real_ui_agent_output.txt
 tests/agent/autonomy_stress_results.json
 tests/agent/general_web_results.txt
+tests/agent/debug_*.py
+
+# TypeScript incremental build info
+*.tsbuildinfo
 

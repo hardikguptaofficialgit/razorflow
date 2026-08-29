@@ -1,0 +1,1 @@
+"""Shopping domain modules."""

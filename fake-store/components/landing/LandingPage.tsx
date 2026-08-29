@@ -10,18 +10,18 @@ const HERO_IMAGE =
 
 const PACKAGES = [
   {
-    name: "@strykerinside/razorflow-protocol",
+    name: "@hardik21232323/razorflow-protocol",
     role: "Wire types",
     detail:
       "Shared schemas for observations, actions, and WebSocket messages.",
   },
   {
-    name: "@strykerinside/razorflow-browser",
+    name: "@hardik21232323/razorflow-browser",
     role: "Browser layer",
     detail: "BrowserEnvironment interface and DOM observation builders.",
   },
   {
-    name: "@strykerinside/razorflow-client",
+    name: "@hardik21232323/razorflow-client",
     role: "Agent SDK",
     detail:
       "RazorFlow client, transport, and run lifecycle for any web app.",
@@ -76,7 +76,7 @@ const NAV_LINKS: NavLink[] = [
   { href: "#sdk", label: "SDK" },
   { href: "#how-it-works", label: "How it works" },
   {
-    href: "https://www.npmjs.com/org/strykerinside",
+    href: "https://www.npmjs.com/~hardik21232323",
     label: "npm",
     external: true,
   },
@@ -301,7 +301,7 @@ export function LandingPage() {
             <p className="mt-3 max-w-xl text-[15px] leading-relaxed text-[#5c6478]">
               Published on npm under{" "}
               <span className="font-semibold text-[#20283a]">
-                @strykerinside
+                @hardik21232323
               </span>
               . Install the client in your app; the runtime stays server-side.
             </p>
@@ -344,9 +344,9 @@ export function LandingPage() {
             </div>
 
             <pre className="overflow-x-auto p-4 text-[12px] leading-6 text-white/80 sm:p-5 sm:text-[13px] sm:leading-7">
-              <code>{`npm install @strykerinside/razorflow-client @strykerinside/razorflow-browser
+              <code>{`npm install @hardik21232323/razorflow-client @hardik21232323/razorflow-browser
 
-import RazorFlow from "@strykerinside/razorflow-client";
+import RazorFlow from "@hardik21232323/razorflow-client";
 import { myEnvironment } from "./my-environment";
 
 const rf = new RazorFlow({

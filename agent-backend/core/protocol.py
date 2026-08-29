@@ -237,6 +237,35 @@ class DeclinePaymentLinkMessage(BaseModel):
     run_id: str = Field(alias="runId", min_length=1)
 
 
+class ConfigureAgentMessage(BaseModel):
+    """Client BYOK / runtime settings for this WebSocket connection."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    type: Literal["CONFIGURE_AGENT"]
+    use_byok: bool = Field(default=False, alias="useByok")
+    provider: str | None = None
+    api_key: str | None = Field(default=None, alias="apiKey")
+    model: str | None = None
+    temperature: float | None = Field(default=None, ge=0.0, le=1.5)
+    max_agent_steps: int | None = Field(default=None, alias="maxAgentSteps", ge=5, le=200)
+    shopping_skill_enabled: bool | None = Field(default=None, alias="shoppingSkillEnabled")
+
+
+class AgentConfigStatusMessage(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    type: Literal["AGENT_CONFIG_STATUS"]
+    mode: Literal["server_default", "byok"]
+    use_byok: bool = Field(alias="useByok")
+    provider: str | None = None
+    model: str | None = None
+    temperature: float | None = None
+    max_agent_steps: int = Field(alias="maxAgentSteps")
+    shopping_skill_enabled: bool = Field(alias="shoppingSkillEnabled")
+    message: str = ""
+
+
 ExtensionMessage = Annotated[
     Union[
         StartRunMessage,
@@ -245,6 +274,7 @@ ExtensionMessage = Annotated[
         CancelRunMessage,
         ConfirmPaymentLinkMessage,
         DeclinePaymentLinkMessage,
+        ConfigureAgentMessage,
     ],
     Field(discriminator="type"),
 ]

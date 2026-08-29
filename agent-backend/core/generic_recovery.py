@@ -6,7 +6,7 @@ import logging
 from dataclasses import dataclass
 from typing import Literal
 
-from core.protocol import PageContext, PlannerChunkOutput, ClickElementStep
+from core.protocol import PageContext, PlannerChunkOutput, ClickElementStep, ScrollPageStep, GoBackStep
 from core.run_manager import RunSession
 from core.generic_page_analyzer import get_generic_page_analyzer
 from core.action_loop import action_signature
@@ -249,6 +249,37 @@ class GenericRecovery:
             return True, "No interactive elements found on page"
 
         return False, ""
+
+
+def recovery_to_planner_chunk(
+    recovery_action: RecoveryAction,
+    session: RunSession,
+) -> PlannerChunkOutput | None:
+    """Convert a generic recovery suggestion into executable wire steps."""
+    if recovery_action.action_type == "scroll":
+        session.auto_recovery_count += 1
+        return PlannerChunkOutput(
+            steps=[ScrollPageStep(action="scroll_page", direction="down", amount_px=700)],
+        )
+    if recovery_action.action_type == "navigate_back":
+        session.auto_recovery_count += 1
+        return PlannerChunkOutput(steps=[GoBackStep(action="go_back")])
+    if (
+        recovery_action.action_type == "alternative"
+        and recovery_action.target_element_index is not None
+    ):
+        session.auto_recovery_count += 1
+        return PlannerChunkOutput(
+            steps=[
+                ClickElementStep(
+                    action="click_element",
+                    role="button",
+                    elementIndex=recovery_action.target_element_index,
+                    matchText=recovery_action.target_text or "",
+                )
+            ],
+        )
+    return None
 
 
 # Singleton instance

@@ -17,7 +17,7 @@ import type {
   ServerToClientMessage,
   TraceStep,
 } from "@hardik21232323/razorflow-protocol";
-import { sanitizePageContextWire } from "@hardik21232323/razorflow-protocol";
+import { sanitizePageContextWire, RazorFlowError } from "@hardik21232323/razorflow-protocol";
 import type { BrowserEnvironment } from "@hardik21232323/razorflow-browser";
 
 // ---------------------------------------------------------------------------
@@ -41,6 +41,8 @@ export class WebSocketTransport implements Transport {
   private connectionHandlers = new Set<(c: boolean) => void>();
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private shouldReconnect = true;
+  private reconnectAttempts = 0;
+  private readonly maxReconnectAttempts = 8;
 
   constructor(url: string, apiKey?: string) {
     this.url = url;
@@ -60,14 +62,23 @@ export class WebSocketTransport implements Transport {
       const ws = new WebSocket(wsUrl);
       this.ws = ws;
       ws.onopen = () => {
+        this.reconnectAttempts = 0;
         this.notifyConnection(true);
         resolve();
       };
-      ws.onerror = () => reject(new Error("WebSocket connection failed"));
+      ws.onerror = () =>
+        reject(
+          new RazorFlowError(
+            "TRANSPORT_CONNECT_FAILED",
+            "WebSocket connection failed",
+          ),
+        );
       ws.onclose = () => {
         this.notifyConnection(false);
-        if (this.shouldReconnect) {
-          this.reconnectTimer = setTimeout(() => void this.connect(), 2000);
+        if (this.shouldReconnect && this.reconnectAttempts < this.maxReconnectAttempts) {
+          const delay = Math.min(30_000, 1000 * 2 ** this.reconnectAttempts);
+          this.reconnectAttempts += 1;
+          this.reconnectTimer = setTimeout(() => void this.connect().catch(() => {}), delay);
         }
       };
       ws.onmessage = (event) => {
@@ -94,7 +105,7 @@ export class WebSocketTransport implements Transport {
 
   send(message: ClientToServerMessage): void {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
-      throw new Error("Transport not connected");
+      throw new RazorFlowError("TRANSPORT_DISCONNECTED", "Transport not connected");
     }
     this.ws.send(JSON.stringify(message));
   }
@@ -154,6 +165,16 @@ export type RazorFlowEventMap = {
   completed: { runId: string; message?: string };
   failed: { runId: string; message: string };
   connection_change: { connected: boolean };
+  agent_config_status: {
+    mode: "server_default" | "byok";
+    useByok: boolean;
+    provider?: string;
+    model?: string;
+    temperature?: number;
+    maxAgentSteps: number;
+    shoppingSkillEnabled: boolean;
+    message?: string;
+  };
   agent_sync: {
     runId: string;
     phase: string;
@@ -181,6 +202,13 @@ export interface RunStatus {
   connected: boolean;
   error: string | null;
   waitingMessage: string | null;
+}
+
+export interface RunResult {
+  runId: string;
+  status: "completed" | "handoff" | "failed" | "cancelled";
+  message?: string;
+  trace: RunTrace;
 }
 
 export class AgentRun {
@@ -273,6 +301,102 @@ export class AgentRun {
     });
   }
 
+  /**
+   * Await terminal run outcome (completed, handoff, or failure).
+   */
+  untilComplete(options?: { timeoutMs?: number }): Promise<RunResult> {
+    const timeoutMs = options?.timeoutMs ?? 300_000;
+    return new Promise<RunResult>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        cleanup();
+        reject(
+          new RazorFlowError("RUN_TIMEOUT", "Run timed out", {
+            runId: this.runId,
+            recoverable: true,
+          }),
+        );
+      }, timeoutMs);
+
+      const finish = (result: RunResult) => {
+        cleanup();
+        resolve(result);
+      };
+
+      const fail = (message: string, recoverable = false) => {
+        cleanup();
+        reject(
+          new RazorFlowError("RUN_FAILED", message, {
+            runId: this.runId,
+            recoverable,
+          }),
+        );
+      };
+
+      const offComplete = this.client.on("completed", (payload) => {
+        if (payload.runId !== this.runId) {
+          return;
+        }
+        finish({
+          runId: this.runId,
+          status: "completed",
+          message: payload.message,
+          trace: this.trace,
+        });
+      });
+      const offHandoff = this.client.on("handoff", (payload) => {
+        if (payload.runId !== this.runId) {
+          return;
+        }
+        finish({
+          runId: this.runId,
+          status: "handoff",
+          message: payload.message,
+          trace: this.trace,
+        });
+      });
+      const offFailed = this.client.on("failed", (payload) => {
+        if (payload.runId !== this.runId) {
+          return;
+        }
+        fail(payload.message);
+      });
+      const offClarify = this.client.on("needs_clarification", (payload) => {
+        if (payload.runId !== this.runId) {
+          return;
+        }
+        finish({
+          runId: this.runId,
+          status: "handoff",
+          message: payload.message,
+          trace: this.trace,
+        });
+      });
+
+      const cleanup = () => {
+        clearTimeout(timer);
+        offComplete();
+        offHandoff();
+        offFailed();
+        offClarify();
+      };
+
+      if (this._phase === "completed") {
+        finish({ runId: this.runId, status: "completed", trace: this.trace });
+      } else if (this._phase === "failed") {
+        fail(this._error ?? "Run failed");
+      } else if (this._phase === "handoff") {
+        finish({
+          runId: this.runId,
+          status: "handoff",
+          message: this._waitingMessage ?? undefined,
+          trace: this.trace,
+        });
+      } else if (this._phase === "cancelled") {
+        finish({ runId: this.runId, status: "cancelled", trace: this.trace });
+      }
+    });
+  }
+
   /** @internal */
   handleServerMessage(message: ServerToClientMessage): void {
     if ("runId" in message && message.runId && message.runId !== this.runId) {
@@ -342,7 +466,14 @@ export class AgentRun {
       case "PAYMENT_LINK_FAILED":
         this._phase = "failed";
         this._error = message.message;
-        this.client.emit("failed", { runId: this.runId, message: message.message });
+        this.client.emit("failed", {
+          runId: this.runId,
+          message: message.message,
+        });
+        if (!message.recoverable) {
+          this._trace.endedAt = Date.now();
+          this.pushTrace("failed", "failed", { message: message.message });
+        }
         break;
       default:
         break;
@@ -510,6 +641,16 @@ export interface RunOptions {
   runId?: string;
 }
 
+export interface AgentConfigureOptions {
+  useByok: boolean;
+  provider?: string;
+  apiKey?: string;
+  model?: string;
+  temperature?: number;
+  maxAgentSteps?: number;
+  shoppingSkillEnabled?: boolean;
+}
+
 export class RazorFlow {
   readonly transport: Transport;
   readonly environment: BrowserEnvironment;
@@ -540,6 +681,18 @@ export class RazorFlow {
       if (msg.type === "EXECUTOR_MODE") {
         this.emit("executor_mode", { runId: msg.runId, mode: msg.mode });
       }
+      if (msg.type === "AGENT_CONFIG_STATUS") {
+        this.emit("agent_config_status", {
+          mode: msg.mode,
+          useByok: msg.useByok,
+          provider: msg.provider,
+          model: msg.model,
+          temperature: msg.temperature,
+          maxAgentSteps: msg.maxAgentSteps,
+          shoppingSkillEnabled: msg.shoppingSkillEnabled,
+          message: msg.message,
+        });
+      }
       this.activeRun?.handleServerMessage(msg);
     });
     this.transport.onConnectionChange((connected) => {
@@ -568,6 +721,25 @@ export class RazorFlow {
 
   async connect(): Promise<void> {
     await this.transport.connect();
+  }
+
+  configureAgent(options: AgentConfigureOptions): void {
+    if (!this.transport.isConnected()) {
+      throw new RazorFlowError(
+        "TRANSPORT_DISCONNECTED",
+        "Connect before configuring the agent",
+      );
+    }
+    this.transport.send({
+      type: "CONFIGURE_AGENT",
+      useByok: options.useByok,
+      provider: options.provider,
+      apiKey: options.apiKey,
+      model: options.model,
+      temperature: options.temperature,
+      maxAgentSteps: options.maxAgentSteps,
+      shoppingSkillEnabled: options.shoppingSkillEnabled,
+    });
   }
 
   disconnect(): void {
@@ -619,6 +791,11 @@ export type {
   ServerToClientMessage,
   TraceStep,
 } from "@hardik21232323/razorflow-protocol";
-export { sanitizePageContextWire } from "@hardik21232323/razorflow-protocol";
+export { sanitizePageContextWire, RazorFlowError } from "@hardik21232323/razorflow-protocol";
 export type { BrowserEnvironment, StepResult } from "@hardik21232323/razorflow-browser";
-export { buildBrowserObservation, observationToWire } from "@hardik21232323/razorflow-browser";
+export {
+  buildBrowserObservation,
+  observationToWire,
+  DomBrowserEnvironment,
+} from "@hardik21232323/razorflow-browser";
+export type { RazorFlowErrorCode } from "@hardik21232323/razorflow-protocol";
