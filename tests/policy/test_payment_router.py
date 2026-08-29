@@ -91,3 +91,18 @@ def test_idempotency_key_cannot_change_payment_details(
         )
 
     assert error.value.status_code == 409
+
+
+def test_policy_block_is_reported_as_forbidden() -> None:
+    with pytest.raises(HTTPException) as error:
+        asyncio.run(
+            create_payment_link(
+                _request(
+                    idempotencyKey="over-limit-test-key",
+                    amountPaise=500001,
+                ),
+            ),
+        )
+
+    assert error.value.status_code == 403
+    assert "max spend limit" in str(error.value.detail)

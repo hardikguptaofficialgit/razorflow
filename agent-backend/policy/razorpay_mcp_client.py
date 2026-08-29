@@ -136,7 +136,6 @@ class RazorpayMcpClient:
                 "clientInfo": {"name": "razorflow-agent", "version": "0.1.0"},
             },
         )
-        await self._rpc("notifications/initialized", {})
 
     async def create_payment_link(
         self,
@@ -179,6 +178,7 @@ class RazorpayMcpClient:
         if not isinstance(result, dict):
             raise RazorpayMcpError("Unexpected MCP tool result shape.")
 
+        payloads: list[dict[str, Any]] = []
         content = result.get("content")
         if isinstance(content, list):
             for item in content:
@@ -189,34 +189,54 @@ class RazorpayMcpClient:
                     try:
                         parsed = json.loads(text)
                         if isinstance(parsed, dict):
-                            return parsed
+                            payloads.append(parsed)
                     except json.JSONDecodeError:
                         if "http" in text:
-                            return {"short_url": text.strip()}
+                            payloads.append({"short_url": text.strip()})
         if "structuredContent" in result and isinstance(
             result["structuredContent"],
             dict,
         ):
-            return result["structuredContent"]
+            payloads.append(result["structuredContent"])
+
+        if payloads:
+            merged: dict[str, Any] = {}
+            for payload in payloads:
+                merged.update(payload)
+            return merged
 
         return result
 
     def _extract_payment_url(self, payload: dict[str, Any]) -> str | None:
-        for key in ("short_url", "payment_link_url", "url", "shortUrl"):
-            value = payload.get(key)
-            if isinstance(value, str) and value.startswith("http"):
-                return value
+        preferred_keys = {"short_url", "payment_link_url", "url", "shortUrl"}
 
-        nested = payload.get("payment_link")
-        if isinstance(nested, dict):
-            for key in ("short_url", "url"):
-                value = nested.get(key)
-                if isinstance(value, str) and value.startswith("http"):
-                    return value
+        def walk(value: Any, key: str = "") -> str | None:
+            if isinstance(value, dict):
+                for child_key, child_value in value.items():
+                    if child_key in preferred_keys and isinstance(child_value, str):
+                        if child_value.startswith(("http://", "https://")):
+                            return child_value
+                    found = walk(child_value, child_key)
+                    if found:
+                        return found
+            elif isinstance(value, list):
+                for child in value:
+                    found = walk(child)
+                    if found:
+                        return found
+            elif isinstance(value, str) and key in preferred_keys:
+                match = re.search(r"https?://[^\s\"']+", value)
+                if match:
+                    return match.group(0)
+            return None
+
+        found = walk(payload)
+        if found:
+            return found
 
         text_blob = json.dumps(payload)
-        match = re.search(r"https://[^\s\"']+", text_blob)
-        return match.group(0) if match else None
+        match = re.search(r"https?://[^\s\"']+", text_blob)
+        return match.group(0).rstrip(".,)") if match else None
 
 
 razorpay_mcp_client = RazorpayMcpClient()

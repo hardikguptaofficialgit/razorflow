@@ -85,7 +85,12 @@ async def create_payment_link(
         )
 
         if not result.success or result.payment_link is None:
-            raise HTTPException(status_code=502, detail=result.message)
+            status_code = (
+                403
+                if result.policy is not None and result.policy.decision == "blocked"
+                else 502
+            )
+            raise HTTPException(status_code=status_code, detail=result.message)
 
         payload = {
             "paymentLinkUrl": result.payment_link.payment_link_url,
