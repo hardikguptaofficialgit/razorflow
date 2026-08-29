@@ -1232,20 +1232,25 @@ body {
 
 .rf-agent-suggestions {
   display: flex;
-  flex-direction: column;
+  flex-wrap: wrap;
   gap: 6px;
+  width: 100%;
 }
 
 .rf-agent-suggestions button {
   border: 1px solid rgba(10, 10, 12, 0.08);
-  border-radius: 10px;
+  border-radius: 9999px;
   background: #fff;
   color: #374151;
   font-size: 0.6875rem;
   font-weight: 500;
-  padding: 8px 10px;
+  padding: 6px 10px;
   text-align: left;
   cursor: pointer;
+  white-space: nowrap;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .rf-agent-suggestions button:hover {
@@ -1450,11 +1455,19 @@ body {
 
 .rf-agent-compose {
   display: flex;
-  align-items: center;
-  gap: 6px;
+  flex-direction: column;
+  gap: 8px;
   padding: 10px 12px;
   border-top: 1px solid rgba(10, 10, 12, 0.06);
   background: #fafafa;
+}
+
+.rf-agent-compose__row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  min-width: 0;
 }
 
 .rf-agent-compose input {

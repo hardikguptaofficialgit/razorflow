@@ -61,6 +61,7 @@ from core.run_manager import RunManager
 from policy.payment_executor import execute_payment_link_creation
 from policy.payment_policy import PaymentLinkProposal
 from policy.audit_router import router as audit_router
+from policy.payment_router import router as payment_router
 from utils.config import (
     get_browser_use_cdp_url,
     get_gemini_model,
@@ -105,6 +106,7 @@ app.add_middleware(
 )
 app.include_router(voice_router)
 app.include_router(audit_router)
+app.include_router(payment_router)
 
 
 class TestLlmRequest(BaseModel):

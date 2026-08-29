@@ -29,6 +29,10 @@ _TRAILING_GOAL_TAIL = re.compile(
     r"\s*,\s*(?:inspect|compare|choose|pick|then).*$",
     re.I,
 )
+_TRAILING_PRICE_QUALITY = re.compile(
+    r"\s+at\s+the\s+(?:best|lowest|cheapest)\s+price\b.*$",
+    re.I,
+)
 
 _BUDGET_CLAUSE = re.compile(
     r"\b(?:under|below|less\s+than|max(?:imum)?|upto|up\s+to)\s*"
@@ -70,6 +74,7 @@ def _strip_wrappers(text: str) -> str:
     cleaned = _BUDGET_CLAUSE.sub(" ", text)
     cleaned = _TRAILING_GOAL.sub("", cleaned)
     cleaned = _TRAILING_GOAL_TAIL.sub("", cleaned)
+    cleaned = _TRAILING_PRICE_QUALITY.sub("", cleaned)
     cleaned = _TRAILING_SITE.sub("", cleaned)
     cleaned = _TRAILING_POLITE.sub("", cleaned)
     cleaned = re.sub(
@@ -104,6 +109,14 @@ def extract_entity_phrases(task: str) -> tuple[str, ...]:
     raw = task.strip()
     if not raw:
         return ()
+
+    if re.search(r"^\s*compare\b", raw, re.I) and re.search(
+        r"\badd\b.+\b(?:cart|bag|basket)\b", raw, re.I
+    ):
+        after_compare = re.split(r"\bcompare\b", raw, maxsplit=1, flags=re.I)[-1]
+        phrase = extract_entity_phrase(after_compare)
+        if phrase:
+            return (phrase,)
 
     if re.search(r"\bcompare\b", raw, re.I) and re.search(
         r"\badd\b.+\b(?:cart|bag|basket)\b", raw, re.I

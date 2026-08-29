@@ -7,8 +7,7 @@ export const products: Product[] = [
     description: "Everyday fitness tracking with heart-rate monitor and 7-day battery.",
     price: 1999,
     category: "electronics",
-    imageUrl:
-      "https://images.unsplash.com/photo-1523275335684-37898b6baf30?w=600&auto=format&fit=crop",
+    imageUrl: "/products/sw-basic.jpg",
     stock: 24,
     rating: 4.1,
   },
@@ -18,8 +17,7 @@ export const products: Product[] = [
     description: "AMOLED display, GPS, and sleep insights for active lifestyles.",
     price: 3499,
     category: "electronics",
-    imageUrl:
-      "https://images.unsplash.com/photo-1579586337278-3befd40fd17a?w=600&auto=format&fit=crop",
+    imageUrl: "/products/sw-pro.jpg",
     stock: 18,
     rating: 4.5,
   },
@@ -29,8 +27,7 @@ export const products: Product[] = [
     description: "Budget-friendly smartwatch with notifications and step counter.",
     price: 1299,
     category: "electronics",
-    imageUrl:
-      "https://images.unsplash.com/photo-1544117519-31a4b719223d?w=600&auto=format&fit=crop",
+    imageUrl: "/products/sw-lite.jpg",
     stock: 30,
     rating: 3.9,
   },
@@ -40,8 +37,7 @@ export const products: Product[] = [
     description: "True wireless earbuds with ANC and 24-hour case battery.",
     price: 2499,
     category: "electronics",
-    imageUrl:
-      "https://images.unsplash.com/photo-1590658268037-6bf12165a8df?w=600&auto=format&fit=crop",
+    imageUrl: "/products/buds-air.jpg",
     stock: 40,
     rating: 4.4,
   },
@@ -51,8 +47,7 @@ export const products: Product[] = [
     description: "Sweat-resistant wireless earbuds with secure fit for workouts.",
     price: 1899,
     category: "electronics",
-    imageUrl:
-      "https://images.unsplash.com/photo-1606220945770-b5b6c2c55bf1?w=600&auto=format&fit=crop",
+    imageUrl: "/products/buds-sport.jpg",
     stock: 35,
     rating: 4.2,
   },
@@ -62,8 +57,7 @@ export const products: Product[] = [
     description: "Clinically proven dandruff control with fresh scent.",
     price: 349,
     category: "personal-care",
-    imageUrl:
-      "https://images.unsplash.com/photo-1556228578-0d85b1a4d571?w=600&auto=format&fit=crop",
+    imageUrl: "/products/shampoo-hs.jpg",
     stock: 50,
     rating: 4.3,
   },
@@ -73,8 +67,7 @@ export const products: Product[] = [
     description: "Gentle daily shampoo with aloe and argan oil.",
     price: 299,
     category: "personal-care",
-    imageUrl:
-      "https://images.unsplash.com/photo-1535585209827-a93fcddd42c5?w=600&auto=format&fit=crop",
+    imageUrl: "/products/shampoo-herbal.jpg",
     stock: 44,
     rating: 4.0,
   },
@@ -84,8 +77,7 @@ export const products: Product[] = [
     description: "Spicy roasted snack mix — great for movie nights.",
     price: 99,
     category: "snacks",
-    imageUrl:
-      "https://images.unsplash.com/photo-1613919113640-25732bed5a63?w=600&auto=format&fit=crop",
+    imageUrl: "/products/snack-mix.jpg",
     stock: 60,
     rating: 4.1,
   },
@@ -95,8 +87,7 @@ export const products: Product[] = [
     description: "Classic kettle-cooked chips with sea salt.",
     price: 79,
     category: "snacks",
-    imageUrl:
-      "https://images.unsplash.com/photo-1566478989037-eec170df7845?w=600&auto=format&fit=crop",
+    imageUrl: "/products/snack-chips.jpg",
     stock: 55,
     rating: 3.8,
   },
@@ -106,8 +97,7 @@ export const products: Product[] = [
     description: "Durable pressure cooker for everyday Indian cooking.",
     price: 1899,
     category: "electronics",
-    imageUrl:
-      "https://images.unsplash.com/photo-1585659722983-3a675dabf23d?w=600&auto=format&fit=crop",
+    imageUrl: "/products/cooker-pigeon.jpg",
     stock: 15,
     rating: 4.3,
   },
@@ -117,8 +107,7 @@ export const products: Product[] = [
     description: "Samsung true wireless earbuds with active noise cancellation.",
     price: 4999,
     category: "electronics",
-    imageUrl:
-      "https://images.unsplash.com/photo-1590658268037-6bf12165a8df?w=600&auto=format&fit=crop",
+    imageUrl: "/products/buds-fe.jpg",
     stock: 22,
     rating: 4.5,
   },
@@ -128,8 +117,7 @@ export const products: Product[] = [
     description: "Classic table butter for cooking and spreading.",
     price: 55,
     category: "snacks",
-    imageUrl:
-      "https://images.unsplash.com/photo-1589985270824-779529bcae4d?w=600&auto=format&fit=crop",
+    imageUrl: "/products/butter-amul.jpg",
     stock: 40,
     rating: 4.6,
   },
@@ -139,8 +127,7 @@ export const products: Product[] = [
     description: "Breathable everyday tee in multiple sizes.",
     price: 599,
     category: "fashion",
-    imageUrl:
-      "https://images.unsplash.com/photo-1521572163474-6864f9cf17ab?w=600&auto=format&fit=crop",
+    imageUrl: "/products/tee-cotton.jpg",
     stock: 28,
     rating: 4.0,
   },

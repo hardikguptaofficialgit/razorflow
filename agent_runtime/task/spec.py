@@ -47,6 +47,10 @@ class TaskSpec:
     def prefer_best(self) -> bool:
         return bool(self.metadata.get("prefer_best", False))
 
+    @property
+    def prefer_cheapest(self) -> bool:
+        return bool(self.metadata.get("prefer_cheapest", False))
+
     def effective_phases(self) -> tuple[str, ...]:
         return self.goal_phases if self.goal_phases else (self.target_phase,)
 
@@ -78,6 +82,8 @@ class TaskSpec:
             lines.append(f"- remaining_items: {', '.join(self.remaining_items)}")
         if self.quantity > 1:
             lines.append(f"- quantity: {self.quantity}")
+        if self.metadata.get("clear_cart"):
+            lines.append("- clear_cart: true; keep removing visible cart items until empty")
         forbidden = self.forbidden_actions
         if self.metadata.get("domain") == "shopping":
             from agent_runtime.domain.shopping.spec import forbidden_for_phase

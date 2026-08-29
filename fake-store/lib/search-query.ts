@@ -262,3 +262,29 @@ export function searchQueriesEquivalent(a: string, b: string): boolean {
     expandSearchToken(token).some((form) => expandedA.has(form)),
   );
 }
+
+/** True when the typed query is reflected in the URL bar or search input. */
+export function searchQuerySatisfied(
+  expected: string,
+  urlQuery: string,
+  inputValue = "",
+): boolean {
+  if (searchQueriesEquivalent(expected, urlQuery)) {
+    return true;
+  }
+  if (inputValue && searchQueriesEquivalent(expected, inputValue)) {
+    return true;
+  }
+  const tokens = sanitizeSearchQuery(expected)
+    .toLowerCase()
+    .split(/\s+/)
+    .filter((token) => token.length > 1);
+  if (tokens.length === 0) {
+    return false;
+  }
+  const urlNorm = decodeURIComponent(urlQuery).toLowerCase();
+  const inputNorm = inputValue.trim().toLowerCase();
+  return tokens.every(
+    (token) => urlNorm.includes(token) || inputNorm.includes(token),
+  );
+}

@@ -2,13 +2,19 @@
 
 from __future__ import annotations
 
+import re
+
 from agent_runtime.executor.actions import AgentAction
 from agent_runtime.domain.shopping.action_gate import _is_add_to_cart_action
 from agent_runtime.domain.shopping.action_gate import _is_checkout_action
 from agent_runtime.domain.shopping.checkout_flow import is_checkout_flow_page
 from agent_runtime.domain.shopping.helpers import goal_item_phrase, multi_distinct_item_goal
 from agent_runtime.domain.shopping.page_semantics import is_cart_page, is_search_results_page
-from agent_runtime.domain.shopping.search_state import entity_search_tokens, search_entity
+from agent_runtime.domain.shopping.search_state import (
+    entity_in_search,
+    entity_search_tokens,
+    search_entity,
+)
 from agent_runtime.observation.browser_state import BrowserPage
 from agent_runtime.state.run_state import RunState
 
@@ -91,14 +97,36 @@ def _add_targets_wrong_product(
     )
     if added_title and not _matches_requested_item(added_title, target):
         return True
-    if added_title and state.memory.verified_items:
-        if multi_distinct_item_goal(state):
-            for verified in state.memory.verified_items:
-                if _matches_requested_item(added_title, verified) and not _matches_requested_item(
-                    verified, target
-                ):
-                    return True
+    if multi_distinct_item_goal(state) and added_title:
+        for verified in state.memory.verified_items:
+            if _matches_requested_item(added_title, verified):
+                return True
     return False
+
+
+def _verify_add_to_cart_click(
+    state: RunState,
+    action: AgentAction,
+    *,
+    before: BrowserPage | None,
+    after: BrowserPage | None,
+) -> bool:
+    if _cart_items(after) <= _cart_items(before):
+        return False
+    if _add_targets_wrong_product(state, action, before=before, after=after):
+        return False
+    if multi_distinct_item_goal(state):
+        target = _current_add_target(state)
+        added_title = _product_for_target(
+            action.target.element_id if action.target else None,
+            before,
+            after,
+        )
+        if target and added_title and not _matches_requested_item(added_title, target):
+            return False
+        if target and not added_title:
+            return False
+    return True
 
 
 def verify_action_result(
@@ -122,6 +150,10 @@ def verify_action_result(
         if action.type == "scroll" and not _default_verify(state, action, before, after):
             return False
         if _is_checkout_action(action) and not is_checkout_flow_page(after):
+            return False
+        if _is_add_to_cart_click(action) and not _verify_add_to_cart_click(
+            state, action, before=before, after=after
+        ):
             return False
         return True
 
@@ -150,7 +182,18 @@ def verify_action_result(
 def _cart_items(page: BrowserPage | None) -> int:
     if page is None:
         return 0
-    return sum(line.quantity for line in page.cart_lines)
+    line_count = sum(line.quantity for line in page.cart_lines)
+    if line_count:
+        return line_count
+    for element in page.elements:
+        match = re.search(
+            r"\bcart\b[^\d]{0,12}(\d+)",
+            f"{element.text} {element.aria_label}",
+            re.I,
+        )
+        if match:
+            return int(match.group(1))
+    return 0
 
 
 def _default_verify(
@@ -228,11 +271,7 @@ def _default_verify(
         if "remove" in label:
             return _cart_items(after) < _cart_items(before)
         if _is_add_to_cart_click(action):
-            if _cart_items(after) <= _cart_items(before):
-                return False
-            if _add_targets_wrong_product(state, action, before=before, after=after):
-                return False
-            return True
+            return _verify_add_to_cart_click(state, action, before=before, after=after)
         if _cart_items(after) > _cart_items(before):
             return True
         if _is_checkout_action(action):

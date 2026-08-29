@@ -62,6 +62,14 @@ def test_view_cart_boundary() -> None:
     assert "search" in spec.forbidden_actions
 
 
+def test_clear_cart_is_not_search() -> None:
+    spec = parse_task_spec("see clear all my things in the cart")
+    assert spec.intent == "remove"
+    assert spec.metadata["remove_target"] == "all"
+    assert spec.metadata["clear_cart"] is True
+    assert spec.target_phase == "item_removed"
+
+
 def test_checkout_boundary() -> None:
     spec = parse_task_spec("checkout")
     assert spec.intent == "checkout"

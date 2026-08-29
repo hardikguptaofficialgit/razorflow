@@ -26,13 +26,14 @@ import {
   executionTraceEnabled,
   pushExecutionTrace,
 } from "@/lib/agent/execution-trace";
-import { extractSearchQuery, sanitizeSearchQuery, searchQueriesEquivalent } from "@/lib/search-query";
-import { DEMO_BASE } from "@/lib/demo-routes";
+import { extractSearchQuery, sanitizeSearchQuery, searchQuerySatisfied } from "@/lib/search-query";
+import { DEMO_BASE, demoRoutes } from "@/lib/demo-routes";
 
 const CHECKOUT_PATH = `${DEMO_BASE}/checkout`;
 const SEARCH_PATH = `${DEMO_BASE}/search`;
 const CART_PATH = `${DEMO_BASE}/cart`;
 const PAGE_CHANGE_TIMEOUT_MS = 10000;
+const SEARCH_PAGE_CHANGE_TIMEOUT_MS = 15000;
 const PAGE_CHANGE_POLL_MS = 80;
 const CURSOR_ANIMATION_MS = 320;
 const TYPE_CHAR_DELAY_MS = 42;
@@ -376,6 +377,46 @@ async function typeTextNaturally(
   element.dispatchEvent(new Event("change", { bubbles: true }));
 }
 
+function submitSearchForm(element: HTMLInputElement): void {
+  const submit = element.form?.querySelector<HTMLElement>(
+    'button[type="submit"], [data-rf-label="Search"]',
+  );
+  if (submit) {
+    submit.click();
+    return;
+  }
+  element.form?.requestSubmit();
+}
+
+function readSearchInputValue(element: HTMLInputElement): string {
+  const live = document.querySelector<HTMLInputElement>(
+    'input[type="search"][name="q"], [data-rf-search-input]',
+  );
+  return (live ?? element).value.trim();
+}
+
+async function waitForSearchQuery(
+  element: HTMLInputElement,
+  text: string,
+  timeoutMs: number,
+): Promise<boolean> {
+  const started = Date.now();
+  while (Date.now() - started < timeoutMs) {
+    const params = new URLSearchParams(window.location.search);
+    const urlQuery = params.get("q") ?? "";
+    const inputValue = readSearchInputValue(element);
+    if (searchQuerySatisfied(text, urlQuery, inputValue)) {
+      return true;
+    }
+    await sleep(PAGE_CHANGE_POLL_MS);
+  }
+  return searchQuerySatisfied(
+    text,
+    new URLSearchParams(window.location.search).get("q") ?? "",
+    readSearchInputValue(element),
+  );
+}
+
 async function executeType(
   step: Extract<ActionStep, { action: "type_in_element" }>,
 ): Promise<StepExecutionResult> {
@@ -405,7 +446,7 @@ async function executeType(
   await typeTextNaturally(element, text);
 
   if (isSearch && element instanceof HTMLInputElement) {
-    element.form?.requestSubmit();
+    submitSearchForm(element);
   }
 
   if (!isSearch) {
@@ -416,24 +457,24 @@ async function executeType(
     };
   }
 
-  const started = Date.now();
-  while (Date.now() - started < PAGE_CHANGE_TIMEOUT_MS) {
-    const params = new URLSearchParams(window.location.search);
-    const urlQuery = params.get("q") ?? "";
-    if (searchQueriesEquivalent(urlQuery, text)) {
-      clearAgentHighlight();
-      await waitForStablePage();
-      return { success: true, verified: true };
-    }
-    if (element.value.trim().toLowerCase() === text.trim().toLowerCase()) {
-      await sleep(200);
-      if (await waitForPageChange(pageSignature())) {
+  if (
+    element instanceof HTMLInputElement &&
+    (await waitForSearchQuery(element, text, SEARCH_PAGE_CHANGE_TIMEOUT_MS))
+  ) {
+    clearAgentHighlight();
+    await waitForStablePage();
+    return { success: true, verified: true };
+  }
+
+  if (element instanceof HTMLInputElement) {
+    const target = demoRoutes.searchQuery(text);
+    if (agentNavigate(target)) {
+      if (await waitForSearchQuery(element, text, 4000)) {
         clearAgentHighlight();
         await waitForStablePage();
         return { success: true, verified: true };
       }
     }
-    await sleep(PAGE_CHANGE_POLL_MS);
   }
 
   clearAgentHighlight();

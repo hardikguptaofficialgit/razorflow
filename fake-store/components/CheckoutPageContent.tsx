@@ -13,6 +13,13 @@ import { isSupabaseConfigured } from "@/lib/supabase/config";
 import { useToast } from "@/lib/toast-context";
 import { demoRoutes } from "@/lib/demo-routes";
 
+interface PaymentLinkState {
+  url: string;
+  amountPaise: number;
+  currency: string;
+  referenceId: string;
+}
+
 function parseAddress(raw: unknown): ShippingAddress | null {
   if (!raw || typeof raw !== "object") {
     return null;
@@ -39,6 +46,11 @@ export function CheckoutPageContent() {
   const { showToast } = useToast();
   const total = getCartTotal();
   const [placing, setPlacing] = useState(false);
+  const [finalizing, setFinalizing] = useState(false);
+  const [paymentLink, setPaymentLink] = useState<PaymentLinkState | null>(null);
+  const [paymentAttemptKey] = useState(
+    () => `checkout-${crypto.randomUUID()}`,
+  );
   const [shippingAddress, setShippingAddress] = useState<ShippingAddress | null>(null);
   const [profileLoading, setProfileLoading] = useState(true);
 
@@ -145,24 +157,25 @@ export function CheckoutPageContent() {
     );
   }
 
+  const orderItems = items
+    .map((line) => {
+      const product = getProductById(line.productId);
+      if (!product) {
+        return null;
+      }
+      return {
+        productId: line.productId,
+        name: product.name,
+        quantity: line.quantity,
+        unitPrice: product.price,
+        lineTotal: product.price * line.quantity,
+        imageUrl: product.imageUrl,
+      };
+    })
+    .filter((line): line is NonNullable<typeof line> => line !== null);
+
   async function handlePayNow() {
     setPlacing(true);
-    const orderItems = items
-      .map((line) => {
-        const product = getProductById(line.productId);
-        if (!product) {
-          return null;
-        }
-        return {
-          productId: line.productId,
-          name: product.name,
-          quantity: line.quantity,
-          unitPrice: product.price,
-          lineTotal: product.price * line.quantity,
-          imageUrl: product.imageUrl,
-        };
-      })
-      .filter((line): line is NonNullable<typeof line> => line !== null);
 
     if (orderItems.length === 0) {
       showToast("Your cart has no valid products.", "error");
@@ -171,33 +184,72 @@ export function CheckoutPageContent() {
     }
 
     try {
-      const res = await fetch("/api/orders", {
+      const res = await fetch("/api/payments/payment-link", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           items: orderItems,
-          subtotal: total,
-          total,
-          shippingAddress,
+          idempotencyKey: paymentAttemptKey,
         }),
+      });
+      const payload = (await res.json()) as {
+        paymentLinkUrl?: string;
+        amountPaise?: number;
+        currency?: string;
+        referenceId?: string;
+        error?: string;
+      };
+
+      if (
+        !res.ok ||
+        !payload.paymentLinkUrl ||
+        typeof payload.amountPaise !== "number" ||
+        !payload.referenceId
+      ) {
+        throw new Error(payload.error || "Could not create a payment link.");
+      }
+
+      setPaymentLink({
+        url: payload.paymentLinkUrl,
+        amountPaise: payload.amountPaise,
+        currency: payload.currency || "INR",
+        referenceId: payload.referenceId,
+      });
+      showToast("Payment link ready. Complete payment to finish.", "success");
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "Could not create a payment link.";
+      showToast(message, "error");
+    } finally {
+      setPlacing(false);
+    }
+  }
+
+  async function handleFinalizeOrder() {
+    setFinalizing(true);
+    try {
+      const res = await fetch("/api/orders", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ items: orderItems, shippingAddress }),
       });
       const payload = (await res.json()) as {
         order?: { id: string };
         error?: string;
       };
-
       if (!res.ok || !payload.order?.id) {
-        throw new Error(payload.error || "Could not place order.");
+        throw new Error(payload.error || "Could not save the order.");
       }
-
       clearCart();
-      showToast("Order placed successfully!", "success");
+      showToast("Order saved successfully!", "success");
       router.push(demoRoutes.order(payload.order.id));
     } catch (err) {
-      const message = err instanceof Error ? err.message : "Could not place order.";
-      showToast(message, "error");
+      showToast(
+        err instanceof Error ? err.message : "Could not save the order.",
+        "error",
+      );
     } finally {
-      setPlacing(false);
+      setFinalizing(false);
     }
   }
 
@@ -269,19 +321,54 @@ export function CheckoutPageContent() {
         </div>
 
         <p className="mt-4 text-xs text-gray-500">
-          Orders are saved to your account. Agent-driven payments can still go through
-          RazorFlow policy + Razorpay test mode.
+          Payment links are created server-side through RazorFlow policy and Razorpay
+          test mode. Your cart is not cleared until you confirm payment below.
         </p>
 
-        <div className="mt-6 flex flex-col gap-3 sm:flex-row">
-          <button
-            type="button"
-            onClick={() => void handlePayNow()}
-            disabled={placing}
-            className="inline-flex flex-1 items-center justify-center rounded-lg bg-gray-900 px-5 py-3 text-sm font-medium text-white hover:bg-gray-800 disabled:opacity-60"
-          >
-            {placing ? "Placing order…" : "Place order"}
-          </button>
+        {paymentLink ? (
+          <div className="mt-6 rounded-xl border border-emerald-200 bg-emerald-50 p-4">
+            <p className="text-sm font-semibold text-emerald-900">
+              Razorpay test payment link created
+            </p>
+            <p className="mt-1 text-sm text-emerald-800">
+              Complete the payment in the new tab, then confirm it here to save the
+              order.
+            </p>
+            <div className="mt-4 flex flex-col gap-3 sm:flex-row">
+              <a
+                href={paymentLink.url}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex flex-1 items-center justify-center rounded-lg bg-gray-900 px-5 py-3 text-sm font-medium text-white hover:bg-gray-800"
+              >
+                Open Razorpay
+              </a>
+              <button
+                type="button"
+                onClick={() => void handleFinalizeOrder()}
+                disabled={finalizing}
+                className="inline-flex flex-1 items-center justify-center rounded-lg border border-emerald-700 px-5 py-3 text-sm font-medium text-emerald-900 hover:bg-emerald-100 disabled:opacity-60"
+              >
+                {finalizing ? "Saving order…" : "Payment completed"}
+              </button>
+            </div>
+            <p className="mt-3 break-all text-xs text-emerald-700">
+              Reference: {paymentLink.referenceId}
+            </p>
+          </div>
+        ) : (
+          <div className="mt-6 flex flex-col gap-3 sm:flex-row">
+            <button
+              type="button"
+              onClick={() => void handlePayNow()}
+              disabled={placing}
+              className="inline-flex flex-1 items-center justify-center rounded-lg bg-gray-900 px-5 py-3 text-sm font-medium text-white hover:bg-gray-800 disabled:opacity-60"
+            >
+              {placing ? "Creating payment link…" : "Pay with Razorpay"}
+            </button>
+          </div>
+        )}
+        <div className="mt-3 flex flex-col gap-3 sm:flex-row">
           <Link
             href={demoRoutes.cart}
             className="inline-flex flex-1 items-center justify-center rounded-lg border border-gray-300 px-5 py-3 text-sm font-medium text-gray-700 hover:bg-gray-50"

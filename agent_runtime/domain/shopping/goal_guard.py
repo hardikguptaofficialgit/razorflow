@@ -13,9 +13,16 @@ from agent_runtime.domain.shopping.action_gate import (
     classify_action,
 )
 from agent_runtime.domain.shopping.action_result import _matches_requested_item
-from agent_runtime.domain.shopping.helpers import allows_add_to_cart, multi_distinct_item_goal, shopping_intent
+from agent_runtime.domain.shopping.helpers import (
+    allows_add_to_cart,
+    multi_distinct_item_goal,
+    prefer_best,
+    prefer_cheapest,
+    shopping_intent,
+)
 from agent_runtime.domain.shopping.search_state import (
     browse_page_add_task,
+    entity_in_search,
     entity_visible_on_page,
     find_goal_ready,
     has_relevant_search_results,
@@ -48,6 +55,11 @@ def action_advances_goal(state: RunState, action: AgentAction) -> tuple[bool, st
     """Return whether the action directly advances incomplete goal work."""
     page = state.memory.current_page
     spec = state.task_spec
+    if (
+        state.metrics.get("auto_add_single_match")
+        and _is_add_to_cart_action(action)
+    ):
+        return True, ""
     allows_add = allows_add_to_cart(spec) if spec else state.parsed_task.goal in {
         "add_to_cart",
         "checkout",
@@ -74,6 +86,14 @@ def action_advances_goal(state: RunState, action: AgentAction) -> tuple[bool, st
             f"{action.target.description} {action.target.match_text} {action.reason}"
         ).lower()
         entity = search_entity(state)
+        if entity and page:
+            if on_search_page(page) and not entity_in_search(
+                page, entity
+            ) and not entity_visible_on_page(page, entity):
+                return (
+                    False,
+                    f"search for '{entity}' first — current results do not include it",
+                )
         for verified in state.memory.verified_items:
             if _matches_requested_item(verified, label):
                 if entity and not _matches_requested_item(verified, entity):
@@ -99,6 +119,17 @@ def action_advances_goal(state: RunState, action: AgentAction) -> tuple[bool, st
     if state.current_phase == "search_results" and spec and len(spec.effective_phases()) > 1:
         if _is_add_to_cart_action(action) and "verified_search" not in state.milestones:
             return False, "complete search/compare phase before adding to cart"
+        if (
+            _is_add_to_cart_action(action)
+            and allows_add
+            and (prefer_best(spec) or prefer_cheapest(spec))
+            and "search_results" in spec.effective_phases()
+            and "verified_comparison" not in state.milestones
+        ):
+            return (
+                False,
+                "compare visible options and pick the best match before adding to cart",
+            )
 
     if _is_add_to_cart_action(action) and allows_add:
         entity = search_entity(state)

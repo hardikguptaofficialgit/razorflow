@@ -35,6 +35,12 @@ def prefer_best(spec: TaskSpec | None) -> bool:
     return bool(spec.metadata.get("prefer_best", False))
 
 
+def prefer_cheapest(spec: TaskSpec | None) -> bool:
+    if spec is None:
+        return False
+    return bool(spec.metadata.get("prefer_cheapest", False))
+
+
 def budget_inr(spec: TaskSpec | None) -> float | None:
     if spec is None:
         return None
@@ -55,6 +61,7 @@ def pack_shopping_metadata(**fields: Any) -> dict[str, Any]:
         "allows_add_to_cart",
         "requires_checkout",
         "prefer_best",
+        "prefer_cheapest",
     }})
     return base
 

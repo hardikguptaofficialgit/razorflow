@@ -21,6 +21,7 @@ from agent_runtime.observation.browser_state import (
     ObservedElement,
     ObservedProduct,
 )
+from agent_runtime.memory.task_memory import TaskMemory
 from agent_runtime.planner.recovery import empty_plan_nudge
 from agent_runtime.state.run_state import RunState
 from agent_runtime.target.resolve import refresh_action_target as refresh_generic_target
@@ -315,3 +316,98 @@ def test_refresh_shopping_delegates_to_generic_for_non_add() -> None:
     resolved = refresh_shopping_action_target(action, page, generic=generic)
     assert resolved.target is not None
     assert resolved.target.element_id == "e2"
+
+
+def test_search_type_action_sets_verified_search_milestone() -> None:
+    """Regression: missing entity_in_search import crashed record_result after search."""
+    parsed, spec = parse_task_with_spec("search for shampoo under ₹300")
+    state = RunState(
+        run_id="search-type",
+        task="search for shampoo under ₹300",
+        parsed_task=parsed,
+        task_spec=spec,
+        memory=TaskMemory(
+            goal="search",
+            items_target=1,
+            remaining_work=["shampoo"],
+            remaining_items=["shampoo"],
+        ),
+        current_phase="search_results",
+    )
+    action = AgentAction(
+        type="type",
+        target=ElementTarget(element_id="e1", role="search", description="search"),
+        parameters={"text": "shampoo"},
+        reason="Type shampoo into the search bar",
+        expectedOutcome="search results",
+    )
+    page = BrowserPage(
+        title="Search",
+        url="http://localhost:3001/demo/search?q=shampoo",
+        path="/demo/search",
+        search_query="shampoo",
+        elements=[],
+        products=[
+            ObservedProduct(
+                product_id="p1",
+                title="Herbal Glow Shampoo 400ml",
+                price_text="₹299",
+                rating_text="4",
+                add_element_id="e5",
+            ),
+        ],
+        signals=["search_results"],
+    )
+
+    apply_verified_progress(state, action, page, ok=True)
+
+    assert "verified_search" in state.milestones
+    assert state.verified_progress_count == 1
+
+
+def test_add_verification_uses_header_cart_count() -> None:
+    task = "add snacks under ₹200 to my cart"
+    parsed, spec = parse_task_with_spec(task)
+    state = RunState(
+        run_id="header-cart",
+        task=task,
+        parsed_task=parsed,
+        task_spec=spec,
+        current_phase=spec.target_phase,
+    )
+    state.bind_skill(
+        __import__(
+            "agent_runtime.domain.registry", fromlist=["resolve_domain_skill"]
+        ).resolve_domain_skill(task)
+    )
+    state.memory.remaining_items = ["snacks"]
+    before = _search_page()
+    before.elements[0] = ObservedElement(
+        element_id="e0",
+        index=0,
+        role="link",
+        tag="a",
+        text="Cart (0)",
+        placeholder="",
+        aria_label="Cart, 0 items",
+    )
+    after = _search_page()
+    after.elements[0] = ObservedElement(
+        element_id="e0",
+        index=0,
+        role="link",
+        tag="a",
+        text="Cart (1)",
+        placeholder="",
+        aria_label="Cart, 1 items",
+    )
+    action = _click("Add to cart Masala Snacks", element_id="e1")
+
+    assert verify_action_result(
+        state,
+        action,
+        success=True,
+        verified=None,
+        before=before,
+        after=after,
+    )

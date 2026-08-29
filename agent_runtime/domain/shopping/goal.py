@@ -7,7 +7,12 @@ from urllib.parse import urlparse
 
 from agent_runtime.observation.browser_state import BrowserPage
 from agent_runtime.state.run_state import RunState
-from agent_runtime.domain.shopping.helpers import allows_add_to_cart, shopping_intent
+from agent_runtime.domain.shopping.helpers import (
+    allows_add_to_cart,
+    prefer_best,
+    prefer_cheapest,
+    shopping_intent,
+)
 from agent_runtime.domain.shopping.spec import GoalPhase
 from agent_runtime.domain.shopping.cart import cart_satisfies_add_goal
 from agent_runtime.domain.shopping.checkout_flow import is_checkout_flow_page, next_param_points_to_checkout
@@ -65,6 +70,13 @@ def _phase_satisfied(phase: GoalPhase, state: RunState, page: BrowserPage) -> bo
             and progress
         ):
             return True
+        if (
+            spec
+            and shopping_intent(spec) == "purchase"
+            and (prefer_best(spec) or prefer_cheapest(spec))
+            and "verified_comparison" not in state.milestones
+        ):
+            return False
         return on_results and progress
 
     if phase == "product_details":
@@ -88,6 +100,10 @@ def _phase_satisfied(phase: GoalPhase, state: RunState, page: BrowserPage) -> bo
         return _phase_satisfied("checkout_reached", state, page)
 
     if phase == "item_removed":
+        if state.task_spec and state.task_spec.metadata.get("clear_cart"):
+            from agent_runtime.domain.shopping.cart import cart_item_count
+
+            return cart_item_count(page) == 0
         task = state.parsed_task
         if task.remove_target:
             needle = task.remove_target.lower()
@@ -101,6 +117,14 @@ def _phase_satisfied(phase: GoalPhase, state: RunState, page: BrowserPage) -> bo
 
 def _milestones_met(phase: GoalPhase, state: RunState) -> bool:
     if phase == "search_results":
+        spec = state.task_spec
+        if spec and shopping_intent(spec) == "purchase" and (
+            prefer_best(spec) or prefer_cheapest(spec)
+        ):
+            return (
+                "verified_search" in state.milestones
+                and "verified_comparison" in state.milestones
+            )
         return "verified_search" in state.milestones
     if phase == "product_details":
         return "verified_search" in state.milestones and _is_product_page(
@@ -150,6 +174,15 @@ def approve_completion(state: RunState, page: BrowserPage | None, *, source: str
         return False
 
     from agent_runtime.domain.shopping.search_state import find_goal_ready
+    from agent_runtime.domain.shopping.cart import cart_item_count
+
+    if (
+        state.task_spec
+        and state.task_spec.metadata.get("clear_cart")
+        and cart_item_count(page) == 0
+    ):
+        state.metrics["completion_source"] = source
+        return True
 
     if find_goal_ready(state, page):
         state.milestones.add("verified_search")

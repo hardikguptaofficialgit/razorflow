@@ -1,27 +1,11 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
-import type { OrderLineItem, ShippingAddress } from "@/lib/account-types";
+import type { ShippingAddress } from "@/lib/account-types";
+import { validateOrderItems } from "@/lib/order-validation";
 
 interface CreateOrderBody {
-  items?: OrderLineItem[];
-  subtotal?: number;
-  total?: number;
+  items?: unknown;
   shippingAddress?: ShippingAddress | null;
-}
-
-function isValidLine(item: OrderLineItem): boolean {
-  return (
-    typeof item.productId === "string" &&
-    item.productId.length > 0 &&
-    typeof item.name === "string" &&
-    item.name.length > 0 &&
-    typeof item.quantity === "number" &&
-    item.quantity > 0 &&
-    typeof item.unitPrice === "number" &&
-    item.unitPrice >= 0 &&
-    typeof item.lineTotal === "number" &&
-    item.lineTotal >= 0
-  );
 }
 
 export async function GET() {
@@ -70,16 +54,13 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Invalid JSON body." }, { status: 400 });
   }
 
-  const items = body.items ?? [];
-  if (!Array.isArray(items) || items.length === 0 || !items.every(isValidLine)) {
+  const validated = validateOrderItems(body.items);
+  if (!validated) {
     return NextResponse.json({ error: "Invalid order items." }, { status: 400 });
   }
 
-  const subtotal = Number(body.subtotal);
-  const total = Number(body.total);
-  if (!Number.isFinite(subtotal) || !Number.isFinite(total) || total <= 0) {
-    return NextResponse.json({ error: "Invalid order total." }, { status: 400 });
-  }
+  const { items, subtotal } = validated;
+  const total = subtotal;
 
   const { data, error } = await supabase
     .from("orders")

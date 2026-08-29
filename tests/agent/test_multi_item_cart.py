@@ -270,3 +270,69 @@ def test_runtime_stops_after_goal_verified() -> None:
     sync_memory(state, runtime.observe(state, page))
     result = runtime.dispatch_next(state, page)
     assert result.kind == "complete"
+
+
+def test_client_verified_flag_does_not_bypass_wrong_product_add() -> None:
+    state = _multi_item_state()
+    before = _search_page_with_watch()
+    after = _cart_page_with_watch(qty=2)
+    state.memory.remaining_items = ["buds"]
+    state.memory.verified_items = ["NoiseFit Halo Smartwatch"]
+    state.memory.items_added = 1
+    action = AgentAction(
+        type="click",
+        target=ElementTarget(
+            element_id="e1",
+            role="button",
+            description="Add ActiveBuds Wireless Earbuds",
+        ),
+        reason="add earbuds",
+        expectedOutcome="cart grows",
+    )
+    ok = verify_action_result(
+        state, action, success=True, verified=True, before=before, after=after
+    )
+    assert not ok
+
+
+def test_goal_guard_blocks_add_when_next_item_not_on_page() -> None:
+    state = _multi_item_state()
+    state.memory.remaining_items = ["buds"]
+    state.memory.verified_items = ["NoiseFit Halo Smartwatch"]
+    state.memory.current_page = BrowserPage(
+        title="Search",
+        url="http://localhost:3001/demo/search?q=smartwatch",
+        path="/demo/search",
+        search_query="smartwatch",
+        elements=[],
+        products=[
+            ObservedProduct(
+                product_id="p1",
+                title="NoiseFit Halo Smartwatch",
+                price_text="₹2499",
+                rating_text="4.2",
+                add_element_id="e1",
+            ),
+        ],
+    )
+    action = AgentAction(
+        type="click",
+        target=ElementTarget(
+            element_id="e1",
+            role="button",
+            description="Add NoiseFit Halo Smartwatch",
+        ),
+        reason="add buds",
+        expectedOutcome="cart",
+    )
+    ok, reason = action_advances_goal(state, action)
+    assert not ok
+    assert "search" in reason.lower()
+
+
+def test_cart_quota_not_met_with_duplicate_line_qty() -> None:
+    state = _multi_item_state()
+    page = _cart_page_with_watch(qty=2)
+    state.memory.verified_items = ["NoiseFit Halo Smartwatch"]
+    state.memory.items_added = 2
+    assert not cart_satisfies_add_goal(state, page)

@@ -190,6 +190,19 @@ class AgentRuntime:
         record_observation(state, page)
         try_advance_phase(state, page)
 
+        bootstrap = getattr(state.skill(), "bootstrap_passive_search_progress", None)
+        if bootstrap is not None:
+            bootstrap(state, page)
+
+        auto_add = getattr(state.skill(), "auto_add_single_budget_match", None)
+        if auto_add is not None and not state.metrics.get("auto_add_dispatched"):
+            action = auto_add(state, page)
+            if action is not None:
+                state.pending_actions = [action]
+                state.pending_action_index = 0
+                state.metrics["auto_add_dispatched"] = True
+                return self._dispatch_pending(state)
+
         if approve_completion(state, page, source="pre_plan"):
             return _completion_or_handoff(state, page, source="pre_plan")
 

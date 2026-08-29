@@ -68,6 +68,17 @@ def cart_matches_hints(page: BrowserPage | None, hints: tuple[str, ...]) -> bool
 
 def cart_satisfies_add_goal(state: RunState, page: BrowserPage | None) -> bool:
     task = state.parsed_task
+    if page is None:
+        return False
+    hints = task.product_hints
+    if multi_distinct_item_goal(state) and hints:
+        titled_lines = [line for line in page.cart_lines if line.title]
+        if titled_lines:
+            if len(titled_lines) < len(hints):
+                return False
+            return cart_matches_hints(page, hints)
+        return False
+
     count = cart_item_count(page)
     if count < task.item_count:
         return False

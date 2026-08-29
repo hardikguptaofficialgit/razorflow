@@ -471,7 +471,7 @@ export function AgentPanel({
           )}
 
           <form className="rf-agent-compose" onSubmit={handleSubmit}>
-            {!busy && suggestions.length > 0 ? (
+            {!busy && suggestions.length > 0 && bridge.timeline.length > 0 ? (
               <div className="rf-agent-suggestions" aria-label="Quick prompts">
                 {suggestions.slice(0, 4).map((suggestion) => (
                   <button
@@ -486,6 +486,7 @@ export function AgentPanel({
                 ))}
               </div>
             ) : null}
+            <div className="rf-agent-compose__row">
             {voice.supported && (
               <button
                 type="button"
@@ -547,6 +548,7 @@ export function AgentPanel({
                 />
               </svg>
             </button>
+            </div>
           </form>
         </div>
       </div>

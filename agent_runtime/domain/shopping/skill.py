@@ -21,7 +21,7 @@ from agent_runtime.domain.shopping.checkout_flow import (
     checkout_requires_handoff,
     is_checkout_flow_page,
 )
-from agent_runtime.domain.shopping.helpers import shopping_intent
+from agent_runtime.domain.shopping.helpers import prefer_best, prefer_cheapest, shopping_intent
 from agent_runtime.domain.shopping.spec import COMPLETION_BY_PHASE, forbidden_for_phase
 from agent_runtime.domain.shopping.action_gate import (
     _is_checkout_action,
@@ -84,6 +84,10 @@ class ShoppingDomainSkill(DomainSkill):
 
     def sync_memory(self, state: RunState, page: BrowserPage | None) -> None:
         memory_sync.sync_memory_from_observation(state, page)
+        if page is not None:
+            from agent_runtime.domain.shopping.product_compare import apply_comparison_to_state
+
+            apply_comparison_to_state(state, page)
 
     def try_advance_phase(self, state: RunState, page: BrowserPage | None) -> bool:
         return phase_progression.try_advance_phase(state, page)
@@ -119,6 +123,75 @@ class ShoppingDomainSkill(DomainSkill):
     def find_goal_ready(self, state: RunState, page: BrowserPage | None) -> bool:
         return search_state.find_goal_ready(state, page)
 
+    def auto_add_single_budget_match(
+        self, state: RunState, page: BrowserPage | None
+    ) -> AgentAction | None:
+        spec = state.task_spec
+        if (
+            page is None
+            or spec is None
+            or shopping_intent(spec) not in {"search", "compare"}
+            or spec.budget_inr is None
+            or not search_state.has_relevant_search_results(page, state)
+        ):
+            return None
+
+        from agent_runtime.domain.shopping.product_compare import (
+            CompareCriteria,
+            eligible_products,
+        )
+
+        criteria = CompareCriteria(
+            query=search_state.search_entity(state),
+            budget_max=spec.budget_inr,
+        )
+        matches = [
+            item
+            for item in eligible_products(page, criteria)
+            if item.price is not None
+        ]
+        if len(matches) != 1:
+            return None
+
+        winner = matches[0]
+        add_element_id = winner.add_element_id
+        if not add_element_id:
+            title_tokens = set(re.findall(r"[a-z0-9]+", winner.title.lower()))
+            for element in page.elements:
+                if element.role != "button" or "add" not in element.text.lower():
+                    continue
+                label_tokens = set(
+                    re.findall(
+                        r"[a-z0-9]+",
+                        f"{element.text} {element.aria_label}".lower(),
+                    )
+                )
+                if title_tokens & label_tokens:
+                    add_element_id = element.element_id
+                    break
+        if not add_element_id:
+            return None
+        state.metrics["auto_add_single_match"] = winner.title
+        state.memory.current_target = winner.title
+        return AgentAction(
+            type="click",
+            target={
+                "elementId": add_element_id,
+                "role": "button",
+                "description": f"Add {winner.title} to cart",
+            },
+            reason=(
+                f"Only one {search_state.search_entity(state)} product is within "
+                f"the ₹{spec.budget_inr:.0f} budget; add it automatically."
+            ),
+            expectedOutcome="The matching product is added to the cart.",
+        )
+
+    def bootstrap_passive_search_progress(
+        self, state: RunState, page: BrowserPage | None
+    ) -> bool:
+        return search_state.bootstrap_passive_search_progress(state, page)
+
     def needs_search(self, state: RunState, page: BrowserPage | None) -> bool:
         return search_state.needs_search(state, page)
 
@@ -143,6 +216,19 @@ class ShoppingDomainSkill(DomainSkill):
                 f"Not on search results yet — use search/type for '{query}' in the search bar. "
                 "Do NOT scroll the homepage product grid."
             )
+        spec = state.task_spec
+        if (
+            spec
+            and shopping_intent(spec) == "purchase"
+            and (prefer_best(spec) or prefer_cheapest(spec))
+            and state.current_phase == "search_results"
+            and "verified_comparison" not in state.milestones
+            and page
+            and search_state.has_relevant_search_results(page, state)
+        ):
+            nudges.append(
+                "Compare visible listings by price and rating, then add only the selected best match."
+            )
         return nudges
 
     def planner_context_extra(self, state: RunState, page: BrowserPage | None) -> str:
@@ -159,6 +245,12 @@ class ShoppingDomainSkill(DomainSkill):
             )
         if state.memory.verified_items:
             lines.append("VERIFIED IN CART: " + ", ".join(state.memory.verified_items[-4:]))
+        if state.metrics.get("selected_product_title"):
+            lines.append(
+                "AUTONOMOUS PICK: "
+                + str(state.metrics["selected_product_title"])
+                + " — add this product only"
+            )
         if not page:
             return "\n".join(lines)
         section = checkout_controls.format_checkout_controls_section(page)

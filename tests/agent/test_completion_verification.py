@@ -10,7 +10,11 @@ sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "agent-backend"))
 
 from agent_runtime.memory.task_memory import TaskMemory
-from agent_runtime.observation.browser_state import BrowserPage, ObservedProduct
+from agent_runtime.observation.browser_state import (
+    BrowserPage,
+    ObservedElement,
+    ObservedProduct,
+)
 from agent_runtime.state.run_state import RunState
 from agent_runtime.task.parse import parse_task_spec
 from agent_runtime.task.parser import parse_task
@@ -59,6 +63,66 @@ def test_true_done_search_on_results() -> None:
     )
     assert is_goal_satisfied(state, page)
     assert approve_completion(state, page, source="goal_check")
+
+
+def test_search_completes_passively_when_results_already_visible() -> None:
+    from agent_runtime.domain.shopping.search_state import bootstrap_passive_search_progress
+
+    state = _state("search for shampoo under ₹300")
+    page = BrowserPage(
+        title="Search",
+        url="http://localhost:3001/demo/search?q=shampoo",
+        path="/demo/search",
+        search_query="shampoo",
+        elements=[],
+        products=[
+            ObservedProduct("p1", "Herbal Glow Shampoo 400ml", "₹299", "", "e5", "e6"),
+            ObservedProduct("p2", "Head & Shoulders Shampoo", "₹349", "", "e7", "e8"),
+        ],
+        cart_lines=[],
+        signals=["search_results"],
+    )
+    assert "verified_search" not in state.milestones
+    assert bootstrap_passive_search_progress(state, page)
+    assert is_goal_satisfied(state, page)
+    assert approve_completion(state, page, source="pre_plan")
+
+
+def test_search_auto_adds_single_result_within_budget() -> None:
+    from agent_runtime.domain.registry import resolve_domain_skill
+
+    state = _state("search for shampoo under ₹300")
+    state.bind_skill(resolve_domain_skill(state.task))
+    page = BrowserPage(
+        title="Search",
+        url="http://localhost:3001/demo/search?q=shampoo",
+        path="/demo/search",
+        search_query="shampoo",
+        elements=[
+            ObservedElement(
+                element_id="e5",
+                index=5,
+                role="button",
+                tag="button",
+                text="Add to cart",
+                placeholder="",
+                aria_label="Add Herbal Glow Shampoo",
+                clickable=True,
+            )
+        ],
+        products=[
+            ObservedProduct("p1", "Head & Shoulders Shampoo", "₹349", "", "e4"),
+            ObservedProduct("p2", "Herbal Glow Shampoo 400ml", "₹299", "", "e5"),
+        ],
+        cart_lines=[],
+        signals=["search_results"],
+    )
+
+    action = state.skill().auto_add_single_budget_match(state, page)
+
+    assert action is not None
+    assert action.target is not None
+    assert action.target.element_id == "e5"
 
 
 def test_llm_continue_but_goal_already_met() -> None:

@@ -52,6 +52,11 @@ _REMOVE = re.compile(
     r"\bremove\s+(?:the\s+)?(.+?)\s+from\b",
     re.I,
 )
+_CLEAR_CART = re.compile(
+    r"\b(?:clear|empty|remove\s+all|delete\s+all)\b[^.]{0,80}"
+    r"\b(?:my\s+)?(?:cart|bag|basket)\b",
+    re.I,
+)
 _OPEN_CART = re.compile(
     r"\b(?:open|view|see|go\s+to|show(?:\s+me)?)\s+(?:my\s+)?(?:cart|bag|basket)\b",
     re.I,
@@ -148,6 +153,7 @@ def _build_spec(
     quantity: int = 1,
     budget_inr: float | None = None,
     prefer_best: bool = False,
+    prefer_cheapest: bool = False,
     remove_target: str | None = None,
     requires_checkout: bool = False,
     allows_add_to_cart: bool = True,
@@ -155,6 +161,7 @@ def _build_spec(
     clarification_reason: str = "",
     remaining_items: tuple[str, ...] = (),
     goal_phases: tuple[GoalPhase, ...] = (),
+    clear_cart: bool = False,
 ) -> TaskSpec:
     phases = goal_phases if goal_phases else ((target_phase or phase_for_intent(intent)),)
     phase = target_phase or phases[0]
@@ -166,11 +173,11 @@ def _build_spec(
         goal=intent,
         objective=objective,
         target_phase=phase,
-        entities=entities,
+        entities=() if clear_cart else entities,
         quantity=quantity,
         actionable=actionable,
         clarification_reason=clarification_reason,
-        remaining_items=remaining_items or entities,
+        remaining_items=remaining_items or (() if clear_cart else entities),
         goal_phases=phases,
         forbidden_actions=forbidden,
         target_state=target,
@@ -180,8 +187,10 @@ def _build_spec(
             allows_add_to_cart=allows_add_to_cart,
             requires_checkout=requires_checkout,
             prefer_best=prefer_best,
+            prefer_cheapest=prefer_cheapest,
             budget_inr=budget_inr,
             remove_target=remove_target,
+            clear_cart=clear_cart,
         ),
     )
 
@@ -199,7 +208,13 @@ def parse_task_spec(task: str) -> TaskSpec:
 
     lowered = raw.lower()
     budget = _extract_budget(raw)
-    prefer_best = "best" in lowered or "cheapest" in lowered
+    prefer_cheapest = (
+        "cheapest" in lowered
+        or "best price" in lowered
+        or "lowest price" in lowered
+        or "at the best price" in lowered
+    )
+    prefer_best = prefer_cheapest or "best" in lowered
     checkout_negated = bool(_CHECKOUT_NEGATED.search(raw))
     requires_checkout = bool(_CHECKOUT.search(raw)) and not checkout_negated
     entities = _usable_entities(extract_entity_phrases(raw))
@@ -235,13 +250,19 @@ def parse_task_spec(task: str) -> TaskSpec:
     quantity = int(qty_match.group(1)) if qty_match else 1
 
     remove_target = _extract_remove_target(raw)
-    if _REMOVE.search(raw) or remove_target:
+    clear_cart = bool(_CLEAR_CART.search(raw))
+    if clear_cart or _REMOVE.search(raw) or remove_target:
         return _build_spec(
             raw=raw,
             intent="remove",
-            objective=f"Remove {remove_target or 'item'} from cart.",
-            entities=entities,
-            remove_target=remove_target,
+            objective=(
+                "Clear all items from the cart."
+                if clear_cart
+                else f"Remove {remove_target or 'item'} from cart."
+            ),
+            entities=() if clear_cart else entities,
+            remove_target="all" if clear_cart else remove_target,
+            clear_cart=clear_cart,
         )
 
     if _VIEW_CART.search(raw) and not _ADD_TO_CART.search(raw):
@@ -279,6 +300,7 @@ def parse_task_spec(task: str) -> TaskSpec:
                 quantity=qty,
                 budget_inr=budget,
                 prefer_best=prefer_best,
+                prefer_cheapest=prefer_cheapest,
                 requires_checkout=True,
                 allows_add_to_cart=True,
                 remaining_items=entities if len(entities) >= 2 else ((primary,) if primary else ()),
@@ -292,6 +314,7 @@ def parse_task_spec(task: str) -> TaskSpec:
             quantity=max(quantity, len(entities) or 1),
             budget_inr=budget,
             prefer_best=prefer_best,
+            prefer_cheapest=prefer_cheapest,
             requires_checkout=True,
         )
 
@@ -322,6 +345,7 @@ def parse_task_spec(task: str) -> TaskSpec:
             quantity=qty,
             budget_inr=budget,
             prefer_best=prefer_best,
+            prefer_cheapest=prefer_cheapest,
             allows_add_to_cart=True,
             remaining_items=entity_tuple,
         )
@@ -341,6 +365,7 @@ def parse_task_spec(task: str) -> TaskSpec:
             quantity=qty,
             budget_inr=budget,
             prefer_best=prefer_best,
+            prefer_cheapest=prefer_cheapest,
             allows_add_to_cart=True,
             remaining_items=entities if len(entities) >= 2 else ((primary,) if primary else ()),
         )
@@ -353,6 +378,38 @@ def parse_task_spec(task: str) -> TaskSpec:
             target_phase="search_results",
             entities=(),
             allows_add_to_cart=False,
+        )
+
+    buy_me = re.search(r"\bbuy\s+me\b", raw, re.I)
+    autonomous_buy = buy_me and (prefer_best or prefer_cheapest)
+    if _BUY.search(raw) and autonomous_buy and not _SUBMIT_ORDER.search(raw):
+        entity_tuple = entities or ((primary,) if primary else ())
+        phases: tuple[GoalPhase, ...]
+        if prefer_best or prefer_cheapest:
+            phases = ("search_results", "cart_updated", "checkout_reached")
+            objective = (
+                "Research visible options, compare price and quality, "
+                "add the best match, then reach checkout."
+            )
+            target: GoalPhase = "search_results"
+        else:
+            phases = ("cart_updated", "checkout_reached")
+            objective = "Add suitable product(s) to cart and reach checkout."
+            target = "cart_updated"
+        return _build_spec(
+            raw=raw,
+            intent="purchase",
+            objective=objective,
+            target_phase=target,
+            goal_phases=phases,
+            entities=entity_tuple,
+            quantity=max(quantity, len(entity_tuple) or 1),
+            budget_inr=budget,
+            prefer_best=prefer_best,
+            prefer_cheapest=prefer_cheapest,
+            requires_checkout=True,
+            allows_add_to_cart=True,
+            remaining_items=entity_tuple,
         )
 
     if _BUY.search(raw) and not _SEARCH.search(raw) and not _SUBMIT_ORDER.search(raw):
@@ -372,6 +429,7 @@ def parse_task_spec(task: str) -> TaskSpec:
             quantity=max(quantity, len(entities) or 1),
             budget_inr=budget,
             prefer_best=prefer_best,
+            prefer_cheapest=prefer_cheapest,
             remaining_items=entities if len(entities) >= 2 else ((primary,) if primary else ()),
         )
 
@@ -388,6 +446,7 @@ def parse_task_spec(task: str) -> TaskSpec:
                 quantity=max(quantity, len(entity_tuple) or 1),
                 budget_inr=budget,
                 prefer_best=prefer_best,
+                prefer_cheapest=prefer_cheapest,
                 allows_add_to_cart=True,
                 remaining_items=entity_tuple,
             )
@@ -406,6 +465,7 @@ def parse_task_spec(task: str) -> TaskSpec:
                 quantity=qty,
                 budget_inr=budget,
                 prefer_best=prefer_best,
+                prefer_cheapest=prefer_cheapest,
                 allows_add_to_cart=True,
                 remaining_items=entities if len(entities) >= 2 else ((primary,) if primary else ()),
             )
@@ -427,6 +487,7 @@ def parse_task_spec(task: str) -> TaskSpec:
             entities=entities or ((primary,) if primary else ()),
             budget_inr=budget,
             prefer_best=prefer_best,
+            prefer_cheapest=prefer_cheapest,
             allows_add_to_cart=allows_add,
         )
 
@@ -438,6 +499,7 @@ def parse_task_spec(task: str) -> TaskSpec:
         entities=entities or ((primary,) if primary else ()),
         budget_inr=budget,
         prefer_best=prefer_best,
+        prefer_cheapest=prefer_cheapest,
     )
 
 

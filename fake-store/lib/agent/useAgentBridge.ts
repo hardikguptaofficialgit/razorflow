@@ -221,7 +221,7 @@ export function useAgentBridge() {
           ...prev,
           phase: "thinking",
           actionSummary: message,
-          timeline: pushTimeline(prev.timeline, message, "info"),
+          timeline: pushTimeline(prev.timeline, message, "error"),
         }));
       }),
       sdk.on("needs_clarification", ({ message }) => {

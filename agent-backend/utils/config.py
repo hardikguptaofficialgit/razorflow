@@ -188,6 +188,16 @@ def get_planner_llm_model(provider: str) -> str:
     return get_gemini_model()
 
 
+def get_planner_max_tokens() -> int:
+    """Cap planner completions — avoids OpenRouter 402 when credits are low."""
+    raw = os.getenv("PLANNER_MAX_TOKENS", "2048").strip()
+    try:
+        value = int(raw)
+    except ValueError:
+        value = 2048
+    return max(256, min(value, 8192))
+
+
 def get_vercel_ai_gateway_api_key() -> str:
     """AI Gateway API key or Vercel OIDC token (see vercel env pull)."""
     return (

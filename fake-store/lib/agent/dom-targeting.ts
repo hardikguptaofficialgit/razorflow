@@ -322,8 +322,13 @@ export function findBySemanticContext(
   const ranked = collectRankedInteractiveElements();
   const productNeedle = needle
     .replace(/\badd\s+to\s+cart\b/g, "")
+    .replace(/\badd\b/g, "")
     .replace(/\bbuy\b/g, "")
+    .replace(/\b(?:for|the|to|cart)\b/g, "")
     .trim();
+  const productTokens = productNeedle
+    .split(/\s+/)
+    .filter((token) => token.length > 2);
 
   let best: { element: HTMLElement; index: number; score: number } | null = null;
 
@@ -346,6 +351,12 @@ export function findBySemanticContext(
     }
     if (productNeedle && cardText.includes(productNeedle)) {
       score += 60;
+    }
+    if (productTokens.length > 0) {
+      const matchedTokens = productTokens.filter((token) =>
+        cardText.includes(token),
+      ).length;
+      score += (matchedTokens / productTokens.length) * 60;
     }
     if (inferRole(element) === role || role === "button") {
       score += 10;

@@ -182,3 +182,31 @@ def entity_visible_on_page(page: BrowserPage | None, entity: str) -> bool:
         if len(needle) >= 4 and needle in text:
             return True
     return False
+
+
+def bootstrap_passive_search_progress(
+    state: RunState,
+    page: BrowserPage | None,
+) -> bool:
+    """Mark search-only goals complete when relevant results are already visible."""
+    spec = state.task_spec
+    if page is None or spec is None:
+        return False
+    if shopping_intent(spec) not in {"search", "compare"}:
+        return False
+    if allows_add_to_cart(spec):
+        return False
+    if "verified_search" in state.milestones:
+        return False
+    if not has_relevant_search_results(page, state):
+        return False
+    state.milestones.add("verified_search")
+    state.verified_progress_count = max(state.verified_progress_count, 1)
+    state.memory.note_completed("search")
+    if page.search_query:
+        state.memory.note_fact(f"Searched: {page.search_query}")
+    else:
+        entity = search_entity(state)
+        if entity:
+            state.memory.note_fact(f"Search results visible for {entity}")
+    return True

@@ -42,6 +42,10 @@ def test_vague_snacks_normalized() -> None:
     assert extract_entity_phrase("add me some good snacks under ₹200") == "snacks"
 
 
+def test_entity_best_price_tail_stripped() -> None:
+    assert extract_entity_phrase("Buy me the best chocolate at the best price") == "chocolate"
+
+
 def test_multi_item_list() -> None:
     phrases = extract_entity_phrases("add amul butter, chips and cooker to my cart")
     assert "butter" in phrases[0].lower() or "amul" in phrases[0].lower()

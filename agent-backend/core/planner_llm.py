@@ -24,6 +24,7 @@ from utils.config import (
     get_openrouter_model,
     get_planner_llm_fallback_chain,
     get_planner_llm_model,
+    get_planner_max_tokens,
     get_vercel_ai_gateway_api_key,
     get_vercel_ai_gateway_model,
     is_gemini_configured,
@@ -316,6 +317,7 @@ def _openrouter_complete_with_key(
         body={
             "model": resolved_model,
             "temperature": temperature,
+            "max_tokens": get_planner_max_tokens(),
             "response_format": {"type": "json_object"},
             "messages": [
                 {"role": "system", "content": system_prompt},
@@ -437,6 +439,7 @@ def _groq_complete_with_key(
         response = client.chat.completions.create(
             model=resolved_model,
             temperature=temperature,
+            max_tokens=get_planner_max_tokens(),
             response_format={"type": "json_object"},
             messages=[
                 {"role": "system", "content": system_prompt},
@@ -607,6 +610,7 @@ def _gemini_complete_with_key(
             "contents": [{"role": "user", "parts": user_parts}],
             "generationConfig": {
                 "temperature": temperature,
+                "maxOutputTokens": get_planner_max_tokens(),
                 "responseMimeType": "application/json",
             },
         },
@@ -642,6 +646,7 @@ def _vercel_gateway_complete_with_key(
         body={
             "model": resolved_model,
             "temperature": temperature,
+            "max_tokens": get_planner_max_tokens(),
             "response_format": {"type": "json_object"},
             "messages": [
                 {"role": "system", "content": system_prompt},

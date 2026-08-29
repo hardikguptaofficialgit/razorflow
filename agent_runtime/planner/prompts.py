@@ -25,6 +25,7 @@ CRITICAL — REMAINING GOAL (before every action):
 - If the action does not directly advance that remaining work, do NOT propose it.
 - FIND/INSPECT/COMPARE goals must NOT add to cart, open checkout, or navigate to cart unless explicitly requested.
 - ADD goals: add exactly the requested quantity, then STOP when cart quota is met.
+- CLEAR CART goals: click one visible Remove control at a time until the cart is empty.
 - After the goal is verified in observation, use proposeFinish=true or return no further actions.
 
 CRITICAL — DO NOT ESCALATE INTENT:

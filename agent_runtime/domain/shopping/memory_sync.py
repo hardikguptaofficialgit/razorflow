@@ -3,7 +3,12 @@
 from __future__ import annotations
 
 from agent_runtime.domain.shopping.action_result import _matches_requested_item
-from agent_runtime.domain.shopping.helpers import allows_add_to_cart, shopping_intent
+from agent_runtime.domain.shopping.helpers import (
+    allows_add_to_cart,
+    prefer_best,
+    prefer_cheapest,
+    shopping_intent,
+)
 from agent_runtime.domain.shopping.page_semantics import is_cart_page
 from agent_runtime.domain.shopping.search_state import (
     find_goal_ready,
@@ -133,11 +138,39 @@ def sync_memory_from_observation(state: RunState, page: BrowserPage | None) -> N
             memory.remaining_work = ["Open cart page"]
 
     elif intent == "remove":
-        target = state.parsed_task.remove_target or "item"
-        memory.remaining_work = [f"Remove {target} from cart"]
+        if spec and spec.metadata.get("clear_cart"):
+            memory.remaining_work = ["Remove every item from the cart until it is empty"]
+        else:
+            target = state.parsed_task.remove_target or "item"
+            memory.remaining_work = [f"Remove {target} from cart"]
 
     elif intent == "purchase":
-        if "checkout_page" in page.signals or "login_required" in page.signals:
+        entity = search_entity(state)
+        if (
+            spec
+            and (prefer_best(spec) or prefer_cheapest(spec))
+            and current_phase == "search_results"
+        ):
+            if needs_search(state, page):
+                memory.remaining_work = [
+                    f"Search for '{entity or 'product'}' to compare options"
+                ]
+            elif "verified_comparison" in state.milestones:
+                pick = state.metrics.get("selected_product_title") or memory.current_target
+                memory.remaining_work = [
+                    f"Add selected product to cart: {pick or entity or 'best match'}",
+                    "Then proceed to checkout",
+                ]
+            elif has_relevant_search_results(page, state):
+                memory.remaining_work = [
+                    "Compare visible price/rating options and select the best match",
+                    "Then add exactly one item and proceed to checkout",
+                ]
+            else:
+                memory.remaining_work = [
+                    f"Search for '{entity or 'product'}' and compare results"
+                ]
+        elif "checkout_page" in page.signals or "login_required" in page.signals:
             memory.remaining_work = ["Complete purchase or hand off for login/payment"]
         elif cart_count > 0:
             memory.remaining_work = ["Proceed to checkout/payment"]
