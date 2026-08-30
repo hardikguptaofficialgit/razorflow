@@ -153,11 +153,11 @@ def get_llm_provider() -> str:
 
 DEFAULT_GEMINI_MODEL = "gemini-2.5-flash"
 
-PLANNER_LLM_CHAIN = ("openrouter", "groq", "vercel_ai_gateway", "gemini")
+PLANNER_LLM_CHAIN = ("openrouter", "vercel_ai_gateway", "groq", "gemini")
 
 
 def get_planner_llm_provider() -> str:
-    """Primary planner LLM: openrouter or groq (defaults to openrouter)."""
+    """Primary planner LLM (defaults to openrouter)."""
     raw = (os.getenv("PLANNER_LLM_PROVIDER", "").strip() or "openrouter").lower()
     if raw in PLANNER_LLM_CHAIN:
         return raw
@@ -165,7 +165,7 @@ def get_planner_llm_provider() -> str:
 
 
 def get_planner_llm_fallback_chain() -> tuple[str, ...]:
-    """Ordered planner providers, defaulting to OpenRouter then Groq."""
+    """Ordered planner providers, defaulting to OpenRouter then Gateway."""
     configured = os.getenv("PLANNER_LLM_PROVIDERS", "").strip()
     if configured:
         chain = tuple(
@@ -210,7 +210,7 @@ def get_vercel_ai_gateway_model() -> str:
     return (
         os.getenv("VERCEL_AI_GATEWAY_MODEL", "").strip()
         or os.getenv("AI_GATEWAY_MODEL", "").strip()
-        or "google/gemini-2.5-flash-lite"
+        or "alibaba/qwen3.7-flash"
     )
 
 

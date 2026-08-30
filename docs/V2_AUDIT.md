@@ -7,7 +7,7 @@
 - `store_planner`, `plan_guard_store`, `action_policy`, `heuristics`
 - `planner_repair`, `task_intent`, `browser_use_runner`
 
-**Single planning authority:** `LLMPlanner` → `LLMProvider.plan()` (Groq → OpenRouter → Gemini).
+**Single planning authority:** `LLMPlanner` → `LLMProvider.plan()` (OpenRouter → Vercel AI Gateway → Groq → Gemini).
 
 ## V2 decision flow
 

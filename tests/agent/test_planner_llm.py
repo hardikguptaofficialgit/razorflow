@@ -28,8 +28,8 @@ def test_planner_defaults_to_openrouter_chain(monkeypatch: pytest.MonkeyPatch) -
     assert config.get_planner_llm_provider() == "openrouter"
     assert config.get_planner_llm_fallback_chain() == (
         "openrouter",
-        "groq",
         "vercel_ai_gateway",
+        "groq",
         "gemini",
     )
 
@@ -148,6 +148,34 @@ def test_planner_uses_groq_after_openrouter_fails(
 
     assert result == '{"steps":[],"terminal":"continue"}'
     groq.assert_called_once()
+
+
+def test_planner_uses_vercel_gateway_before_groq(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("PLANNER_LLM_PROVIDER", "openrouter")
+    monkeypatch.setenv(
+        "PLANNER_LLM_PROVIDERS",
+        "openrouter,vercel_ai_gateway,groq,gemini",
+    )
+    monkeypatch.setenv("OPENROUTER_API_KEY", "test-openrouter")
+    monkeypatch.setenv("AI_GATEWAY_API_KEY", "test-gateway")
+    monkeypatch.setenv("GROQ_API_KEY", "test-groq")
+
+    with patch(
+        "core.planner_llm._openrouter_complete",
+        side_effect=RuntimeError("openrouter down"),
+    ):
+        with patch(
+            "core.planner_llm._vercel_ai_gateway_complete",
+            return_value='{"steps":[],"terminal":"continue"}',
+        ) as gateway:
+            with patch("core.planner_llm._groq_complete") as groq:
+                result = complete_planner_json("system", "user")
+
+    assert result == '{"steps":[],"terminal":"continue"}'
+    gateway.assert_called_once()
+    groq.assert_not_called()
 
 
 def test_planner_does_not_fallback_to_disabled_providers(

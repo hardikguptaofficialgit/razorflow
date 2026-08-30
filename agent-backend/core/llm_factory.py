@@ -1,7 +1,7 @@
 """Build the LLM for the open-source Browser Use executor.
 
 Uses the OSS `browser_use` Agent + Tools stack with a BYO LLM:
-gemini | openrouter | groq | llamacpp. Paid ChatBrowserUse / Browser-Use cloud
+gemini | openrouter | vercel_ai_gateway | groq | llamacpp. Paid ChatBrowserUse / Browser-Use cloud
 LLM is intentionally unsupported.
 
 Retry ownership lives in exactly one place: `utils.llm_resilience`. Client-level retry
@@ -35,6 +35,9 @@ from utils.config import (
     is_gemini_configured,
     is_groq_configured,
     is_openrouter_configured,
+    get_vercel_ai_gateway_api_key,
+    get_vercel_ai_gateway_model,
+    is_vercel_ai_gateway_configured,
 )
 from utils.llm_resilience import ProviderNotConfiguredError
 
@@ -43,13 +46,13 @@ logger = logging.getLogger(__name__)
 _PAID_PROVIDER_MSG = (
     "LLM_PROVIDER=browser_use (ChatBrowserUse / Browser-Use cloud LLM) is disabled. "
     "RazorFlow uses open-source browser-use with a BYO model. "
-    "Set LLM_PROVIDER=gemini|openrouter|groq|llamacpp."
+    "Set LLM_PROVIDER=gemini|openrouter|vercel_ai_gateway|groq|llamacpp."
 )
 
 # One HTTP attempt must finish inside this before the resilience layer retries or fails over.
 _REQUEST_TIMEOUT_SEC = 60.0
 # Failover candidate order after the configured primary.
-_FAILOVER_PREFERENCE = ("openrouter", "gemini", "groq")
+_FAILOVER_PREFERENCE = ("openrouter", "vercel_ai_gateway", "gemini", "groq")
 
 
 def _client_kwargs() -> dict[str, float | int]:
@@ -113,6 +116,28 @@ def _build_provider_llm(provider: str) -> BaseChatModel:
             **_client_kwargs(),
         )
 
+    if provider == "vercel_ai_gateway":
+        api_key = get_vercel_ai_gateway_api_key()
+        if not api_key:
+            raise RuntimeError(
+                "AI_GATEWAY_API_KEY or VERCEL_OIDC_TOKEN is not configured. "
+                "Add one to .env or switch LLM_PROVIDER."
+            )
+        model = get_vercel_ai_gateway_model()
+        logger.info("Using Vercel AI Gateway LLM model=%s", model)
+        return ChatOpenAI(
+            model=model,
+            base_url="https://ai-gateway.vercel.sh/v1",
+            api_key=api_key,
+            temperature=0.0,
+            frequency_penalty=0.0,
+            add_schema_to_system_prompt=True,
+            dont_force_structured_output=True,
+            remove_min_items_from_schema=True,
+            remove_defaults_from_schema=True,
+            **_client_kwargs(),
+        )
+
     if provider != "groq":
         logger.warning("Unknown LLM_PROVIDER=%s — falling back to groq", provider)
 
@@ -136,6 +161,8 @@ def create_browser_use_llm() -> BaseChatModel:
 def _is_fallback_available(provider: str) -> bool:
     if provider == "openrouter":
         return is_openrouter_configured()
+    if provider == "vercel_ai_gateway":
+        return is_vercel_ai_gateway_configured()
     if provider == "gemini":
         return is_gemini_configured()
     if provider == "groq":
@@ -163,8 +190,8 @@ def create_browser_use_llm_slots() -> list[ProviderSlot]:
 
     if not slots:
         raise ProviderNotConfiguredError(
-            "No usable LLM provider. Set OPENROUTER_API_KEY, GROQ_API_KEY or GEMINI_API_KEY, "
-            "or start llama-server."
+            "No usable LLM provider. Set OPENROUTER_API_KEY, AI_GATEWAY_API_KEY, "
+            "GROQ_API_KEY or GEMINI_API_KEY, or start llama-server."
         )
     return slots
 

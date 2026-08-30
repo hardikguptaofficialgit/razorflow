@@ -56,7 +56,7 @@ REPLAN or DONE or HANDOFF
 | `state/run_state.py` | **Single source of truth** for a run |
 | `task/parser.py` | Natural language → structured goal |
 | `observation/browser_state.py` | Rich, compact page representation for LLM |
-| `planner/llm_provider.py` | Groq → OpenRouter → Gemini, key rotation |
+| `planner/llm_provider.py` | OpenRouter → Vercel AI Gateway → Groq → Gemini, key rotation |
 | `planner/planner.py` | Short-horizon structured planning |
 | `executor/actions.py` | Strict V2 action schema |
 | `executor/translate.py` | V2 actions → wire `ActionStep` |

@@ -26,7 +26,7 @@ class LLMProvider(Protocol):
 
 
 class ChainLLMProvider:
-    """OpenRouter → Groq planner chain via existing planner_llm infrastructure."""
+    """OpenRouter → Vercel AI Gateway → Groq → Gemini planner chain."""
 
     def plan(
         self,

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import sys
 import uuid
 from pathlib import Path
@@ -92,14 +93,25 @@ from voice.intent_classifier import router as voice_router
 logger = logging.getLogger(__name__)
 
 app = FastAPI(title="RazorFlow Agent Bridge", version="0.2.0")
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=[
+
+
+def _cors_origins() -> list[str]:
+    origins = [
         "http://localhost:3001",
         "http://127.0.0.1:3001",
         "http://localhost:3000",
         "http://127.0.0.1:3000",
-    ],
+    ]
+    for origin in os.getenv("CORS_ALLOW_ORIGINS", "").split(","):
+        normalized = origin.strip().rstrip("/")
+        if normalized and normalized not in origins:
+            origins.append(normalized)
+    return origins
+
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=_cors_origins(),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

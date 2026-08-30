@@ -75,6 +75,19 @@ def test_create_browser_use_llm_openrouter(monkeypatch: pytest.MonkeyPatch) -> N
     assert llm.model == "google/gemini-2.5-flash-lite:nitro"
 
 
+def test_create_browser_use_llm_vercel_ai_gateway(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("LLM_PROVIDER", "vercel_ai_gateway")
+    monkeypatch.setenv("AI_GATEWAY_API_KEY", "test-gateway-key")
+    monkeypatch.setenv("VERCEL_AI_GATEWAY_MODEL", "google/gemini-2.5-flash-lite")
+
+    from core import llm_factory
+
+    llm = llm_factory.create_browser_use_llm()
+    assert isinstance(llm, ChatOpenAI)
+    assert llm.model == "google/gemini-2.5-flash-lite"
+    assert str(llm.base_url).rstrip("/") == "https://ai-gateway.vercel.sh/v1"
+
+
 def test_create_browser_use_llm_groq(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("LLM_PROVIDER", "groq")
     monkeypatch.setenv("GROQ_API_KEY", "test-key")

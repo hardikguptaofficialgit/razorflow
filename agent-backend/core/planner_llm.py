@@ -1,4 +1,4 @@
-"""LLM completion for the DOM agent planner (OpenRouter → Groq → Vercel AI Gateway → Gemini)."""
+"""LLM completion for the DOM agent planner (OpenRouter → Vercel AI Gateway → Groq → Gemini)."""
 
 from __future__ import annotations
 
